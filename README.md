@@ -14,6 +14,7 @@ Meditação da Mulher
 
 Meditação Jovem
 
+
 Formatação Inteligente: A mensagem é formatada com Markdown para uma leitura agradável no Telegram (negrito, itálico, etc.).
 
 Conteúdo Completo: Publica o título do dia, o verso bíblico, o texto completo da meditação e o link do vídeo do YouTube associado.
@@ -88,23 +89,23 @@ Procure pelo ID do chat (geralmente um número negativo, como -100123456789).
 Por segurança, não coloque as suas credenciais diretamente no código. Em vez disso, o script lê a partir de variáveis de ambiente.
 
 No Linux ou macOS:
-
 Bash
 
 export TELEGRAM_BOT_TOKEN="O_SEU_TOKEN_AQUI"
 export TELEGRAM_CHAT_ID="O_SEU_ID_DO_CHAT_AQUI"
-No Windows (Command Prompt):
 
+No Windows (Command Prompt):
 Bash
 
 set TELEGRAM_BOT_TOKEN="O_SEU_TOKEN_AQUI"
 set TELEGRAM_CHAT_ID="O_SEU_ID_DO_CHAT_AQUI"
+
 ▶️ Executar o Bot Manualmente
 Depois de configurar as variáveis de ambiente, pode testar o script executando-o diretamente no seu terminal:
 
 Bash
-
 python seu_script.py # Substitua pelo nome do seu ficheiro .py
+
 🗓️ Agendamento Automático com GitHub Actions
 Esta é a forma recomendada para garantir que o seu bot publica todos os dias às 7:30 da manhã.
 
