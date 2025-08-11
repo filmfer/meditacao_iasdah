@@ -47,6 +47,7 @@ Bash
 
 git clone [URL_DO_SEU_REPOSITÓRIO_GIT]
 cd [NOME_DA_PASTA_DO_REPOSITÓRIO]
+
 3. Criar e Instalar Dependências
 Crie um ficheiro chamado requirements.txt com o seguinte conteúdo:
 
