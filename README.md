@@ -1,4 +1,5 @@
-🙏 MeditaBot Diário ✨
+🙏 MeditacaoBot Diário - IASD de Angra do Heroísmo✨
+
 Um bot simples e eficaz para extrair meditações diárias do site CPB Mais e publicá-las automaticamente num grupo do Telegram. Nunca mais se esqueça de partilhar a mensagem do dia!
 
 🎯 Sobre o Projeto
@@ -141,6 +142,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python seu_script.py # <-- SUBSTITUA PELO NOME DO SEU FICHEIRO
+
 Adicione os Secrets ao GitHub:
 
 No seu repositório no GitHub, vá a Settings > Secrets and variables > Actions.
