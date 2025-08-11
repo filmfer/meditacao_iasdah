@@ -33,6 +33,7 @@ Extrair o Conteúdo: Acede à página da meditação diária e extrai cada parte
 
 Montar e Enviar: Formata todo o conteúdo numa única mensagem e envia para o chat especificado no Telegram através de um pedido à API do Telegram.
 
+
 ⚙️ Instalação e Configuração
 Siga estes passos para colocar o seu bot a funcionar.
 
@@ -59,6 +60,7 @@ Agora, instale estas dependências:
 Bash
 
 pip install -r requirements.txt
+
 4. 🔑 Obter as Credenciais do Telegram
 Para o bot funcionar, precisa de duas informações secretas:
 
