@@ -82,7 +82,8 @@ def scrape_meditation(base_url, meditacao_matinal_title):
 
 def send_telegram_message(text, bot_token, chat_id):
     """Envia uma mensagem de texto para um chat do Telegram usando a API do Bot."""
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+    url = f"https://api.telegram.org/bot8314369244:AAHbwqh6yNCO3voTQqSy9SHIV_EsTVgxLao/sendMessage"
+    chat_id = -1002558026936
     # O Telegram suporta Markdown para formatação de *negrito* e _itálico_
     payload = {
         'chat_id': chat_id,
