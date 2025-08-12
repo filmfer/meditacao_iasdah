@@ -10,14 +10,16 @@ from urllib3.exceptions import InsecureRequestWarning
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 def safe_locale_set():
-    """Tenta definir o locale para Português do Brasil de forma segura."""
+    """Tenta definir o locale para Português de Portugal de forma segura."""
     try:
-        locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
+        # Prioridade para o formato padrão em sistemas Linux/macOS
+        locale.setlocale(locale.LC_TIME, 'pt_PT.UTF-8')
     except locale.Error:
         try:
-            locale.setlocale(locale.LC_TIME, 'Portuguese_Brazil.1252')
-        except:
-            print("Não foi possível definir o locale para pt_BR. Usando o padrão do sistema.")
+            # Fallback para sistemas Windows
+            locale.setlocale(locale.LC_TIME, 'Portuguese_Portugal.1252')
+        except locale.Error:
+            print("Aviso: Não foi possível definir o locale para pt_PT. A data pode aparecer em inglês.")
             pass
 
 def scrape_meditation(base_url, meditacao_matinal_title):
