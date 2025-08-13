@@ -5,7 +5,7 @@ on:
     # Executa às 7:30 UTC todos os dias.
     # A hora aqui é UTC. Como os Açores em agosto estão em UTC+0, 7:30 é o correto.
     # Ajuste se a sua zona horária for diferente no inverno.
-    - cron: '30 7 * * *'
+    - cron: '34 7 * * *'
   # Permite também executar manualmente a partir do separador Actions no GitHub
   workflow_dispatch:
 
