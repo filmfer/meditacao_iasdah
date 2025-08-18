@@ -67,8 +67,8 @@ def scrape_meditation(base_url, meditacao_matinal_title):
 
         # Formata a mensagem final (com o link do YouTube na linha seguinte, se existir)
         formatted_text = (
-            f"{meditacao_matinal}\n\n"
-            f"{weekday_date}\n"
+            f"{meditacao_matinal}\n"
+            f"{weekday_date}\n\n"
             f"{title_text}\n\n"
             f"{reference_text_content}\n\n"
             f"{meditation_content}\n\n"
