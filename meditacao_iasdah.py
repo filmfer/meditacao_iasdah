@@ -9,7 +9,8 @@ import datetime
 import locale
 import warnings
 from urllib3.exceptions import InsecureRequestWarning
-import re
+# O 're' já não é necessário para a sanitização, mas pode ficar para referência
+import re 
 
 # --- CONFIGURAÇÕES ---
 MAX_RETRIES = 5
@@ -19,17 +20,19 @@ EMAIL_RECEIVER = "filmfer@gmail.com"
 # Suprime avisos de SSL explicitamente
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
-def safe_locale_set():
-    """Tenta definir o locale para Português de Portugal de forma segura."""
-    try:
-        locale.setlocale(locale.LC_TIME, 'pt_PT.UTF-8')
-    except locale.Error:
-        try:
-            locale.setlocale(locale.LC_TIME, 'Portuguese_Portugal.1252')
-        except locale.Error:
-            print("Aviso: Não foi possível definir o locale para pt_PT. A data pode aparecer em inglês.")
-            pass
-
+def format_date_in_portuguese(date_obj):
+    """
+    # NOVO: Formata a data em português, independente do sistema operativo.
+    """
+    dias = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+    meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+    
+    weekday = dias[date_obj.weekday()]
+    day = date_obj.day
+    month = meses[date_obj.month - 1]
+    
+    return f"{weekday}, {day} de {month}"
+    
 def send_error_email(subject, body):
     """Envia um email de notificação de erro."""
     email_sender = os.getenv('EMAIL_ADDRESS')
@@ -54,10 +57,14 @@ def send_error_email(subject, body):
     except Exception as e:
         print(f"Falha catastrófica ao enviar o email de notificação: {e}")
 
-def sanitize_text_for_telegram(text):
-    """Escapa caracteres especiais para o modo MarkdownV2 do Telegram."""
-    escape_chars = r'\_*[]()~`>#+-=|{}.!'
-    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
+def sanitize_text_for_html(text):
+    """
+    # ALTERADO: Prepara o texto para o modo HTML do Telegram.
+    Escapa apenas os 3 caracteres essenciais.
+    """
+    if not text:
+        return ""
+    return text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 
 def scrape_meditation(base_url, meditacao_matinal_title):
@@ -78,35 +85,38 @@ def scrape_meditation(base_url, meditacao_matinal_title):
         soup = BeautifulSoup(response.content, "html.parser")
 
         # --- Extração e Limpeza ---
-        safe_locale_set()
+        # --- Extração e Limpeza ---
+        # ALTERADO: Usa a nova função de data
         today = datetime.date.today()
-        weekday = today.strftime("%A").capitalize()
-        day = today.strftime("%d")
-        month = today.strftime("%B").capitalize()
+        weekday_date = format_date_in_portuguese(today)
         
-        meditacao_matinal = f"*{sanitize_text_for_telegram(meditacao_matinal_title)}*"
-        weekday_date = sanitize_text_for_telegram(f"{weekday}, {day} de {month}")
+                # ALTERADO: Usa sanitização HTML e tags <b> e <i>
+        meditacao_matinal = f"<b>{sanitize_text_for_html(meditacao_matinal_title)}</b>"
 
         title_tag = soup.find("div", class_="mdl-typography--headline")
         title = title_tag.text.strip() if title_tag else "Título não encontrado"
         print(f"  -> Título extraído: {'OK' if title_tag else 'FALHOU'}")
-        title_text = f"*{sanitize_text_for_telegram(title)}*"
+        title_text = f"<b>{sanitize_text_for_html(title)}</b>"
 
         reference_text_tag = soup.find("div", class_="descriptionText versoBiblico")
         reference_text = reference_text_tag.text.strip() if reference_text_tag else "Verso não encontrado"
         print(f"  -> Verso extraído: {'OK' if reference_text_tag else 'FALHOU'}")
-        reference_text_content = f"_{sanitize_text_for_telegram(reference_text)}_"
+        reference_text_content = f"<i>{sanitize_text_for_html(reference_text)}</i>"
 
         meditation_content_tag = soup.find("div", class_="conteudoMeditacao")
         paragraphs = meditation_content_tag.find_all('p') if meditation_content_tag else []
         meditation_content = "\n\n".join(p.text.strip() for p in paragraphs) if paragraphs else (meditation_content_tag.text.strip() if meditation_content_tag else "Conteúdo não encontrado")
         print(f"  -> Conteúdo extraído: {'OK' if meditation_content_tag else 'FALHOU'}")
         
-        meditation_content_sanitized = sanitize_text_for_telegram(meditation_content)
+        meditation_content_sanitized = sanitize_text_for_html(meditation_content)
 
         youtube_iframe_tag = soup.find("iframe", {"src": lambda src: src and "youtube.com/embed" in src})
         youtube_link = youtube_iframe_tag["src"].split('?')[0].replace("embed/", "watch?v=") if youtube_iframe_tag else ""
         print(f"  -> Link YouTube: {'OK' if youtube_iframe_tag else 'FALHOU'}")
+        
+        # MELHORADO: Cria links clicáveis
+        youtube_link_html = f'<a href="{youtube_link}">Ver no YouTube</a>' if youtube_link else ""
+        source_link_html = f'Fonte: <a href="{meditation_url}">CPB Mais</a>'
 
         formatted_text = (
             f"{meditacao_matinal}\n"
@@ -114,8 +124,8 @@ def scrape_meditation(base_url, meditacao_matinal_title):
             f"{title_text}\n"
             f"{reference_text_content}\n\n"
             f"{meditation_content_sanitized}\n\n"
-            f"{youtube_link}\n\n"
-            #f"Fonte: {meditation_url}"
+            f"{youtube_link_html}\n\n"
+            f"{source_link_html}"
         )
         
         if not formatted_text.strip():
@@ -136,7 +146,8 @@ def send_telegram_message(text, bot_token, chat_id):
     payload = {
         'chat_id': chat_id,
         'text': text,
-        'parse_mode': 'MarkdownV2'
+        # ALTERADO: MODO HTML
+        'parse_mode': 'HTML'
     }
     
     try:
