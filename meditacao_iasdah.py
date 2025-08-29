@@ -1,5 +1,3 @@
------------------------------------------ TESTES --------------------------------------
-
 import requests
 import os
 import smtplib
