@@ -110,9 +110,9 @@ def scrape_meditation(base_url, meditacao_matinal_title):
         return formatted_text.strip(), None
 
     except requests.exceptions.RequestException as e:
-        return None, f"Erro de Request (Scraping): {e}"
+        return None, f"Erro de Request (Scraping): {e} ---> {formatted_text}"
     except Exception as e:
-        return None, f"Erro inesperado (Scraping): {e}"
+        return None, f"Erro inesperado (Scraping): {e} ---> {formatted_text}"
 
 def send_telegram_message(text, bot_token, chat_id):
     """Envia uma mensagem para o Telegram com fallback para texto simples em caso de erro de formatação."""
