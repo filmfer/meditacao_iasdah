@@ -9,6 +9,7 @@ import datetime
 import locale
 import warnings
 from urllib3.exceptions import InsecureRequestWarning
+import re
 
 # --- CONFIGURAÇÕES ---
 MAX_RETRIES = 5
@@ -53,13 +54,15 @@ def send_error_email(subject, body):
     except Exception as e:
         print(f"Falha catastrófica ao enviar o email de notificação: {e}")
 
-def sanitize_text(text):
-    """Limpa o texto de caracteres que conflituam com o Markdown do Telegram."""
-    # Remove asteriscos e underscores para evitar erros de formatação
-    return text.replace('*', '').replace('_', '')
+def sanitize_text_for_telegram(text):
+    """Escapa caracteres especiais para o modo MarkdownV2 do Telegram."""
+    escape_chars = r'\_*[]()~`>#+-=|{}.!'
+    return re.sub(f'([{re.escape(escape_chars)}])', r'\\\1', text)
+
 
 def scrape_meditation(base_url, meditacao_matinal_title):
     """Faz o scraping da página da meditação e retorna o texto formatado."""
+    formatted_text = ""
     try:
         response = requests.get(base_url, verify=False, timeout=15)
         response.raise_for_status()
@@ -67,96 +70,90 @@ def scrape_meditation(base_url, meditacao_matinal_title):
 
         link_tag = soup.find("a", class_="mdl-button mdl-button--colored mdl-js-button mdl-js-ripple-effect")
         if not link_tag or not link_tag.has_attr("href"):
-            # Retorna None em caso de falha para ser gerido pelo sistema de tentativas
-            return None, "Link da meditação diária não encontrado"
+            return None, "Link da meditação diária não encontrado na página principal"
 
         meditation_url = link_tag["href"]
         response = requests.get(meditation_url, verify=False, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, "html.parser")
 
-        # Extrai e limpa os textos
-        meditacao_matinal = f"*{meditacao_matinal_title}*"
+        # --- Extração e Limpeza ---
         safe_locale_set()
         today = datetime.date.today()
         weekday = today.strftime("%A").capitalize()
         day = today.strftime("%d")
         month = today.strftime("%B").capitalize()
-        weekday_date = f"{weekday}, {day} de {month}"
+        
+        meditacao_matinal = f"*{sanitize_text_for_telegram(meditacao_matinal_title)}*"
+        weekday_date = sanitize_text_for_telegram(f"{weekday}, {day} de {month}")
 
         title_tag = soup.find("div", class_="mdl-typography--headline")
-        title = sanitize_text(title_tag.text.strip()) if title_tag else "Título não encontrado"
-        title_text = f"*{title}*"
+        title = title_tag.text.strip() if title_tag else "Título não encontrado"
+        print(f"  -> Título extraído: {'OK' if title_tag else 'FALHOU'}")
+        title_text = f"*{sanitize_text_for_telegram(title)}*"
 
         reference_text_tag = soup.find("div", class_="descriptionText versoBiblico")
-        reference_text = sanitize_text(reference_text_tag.text.strip()) if reference_text_tag else "Verso não encontrado"
-        reference_text_content = f"_{reference_text}_"
+        reference_text = reference_text_tag.text.strip() if reference_text_tag else "Verso não encontrado"
+        print(f"  -> Verso extraído: {'OK' if reference_text_tag else 'FALHOU'}")
+        reference_text_content = f"_{sanitize_text_for_telegram(reference_text)}_"
 
         meditation_content_tag = soup.find("div", class_="conteudoMeditacao")
-        meditation_content = sanitize_text(meditation_content_tag.text.strip()) if meditation_content_tag else "Conteúdo não encontrado"
+        paragraphs = meditation_content_tag.find_all('p') if meditation_content_tag else []
+        meditation_content = "\n\n".join(p.text.strip() for p in paragraphs) if paragraphs else (meditation_content_tag.text.strip() if meditation_content_tag else "Conteúdo não encontrado")
+        print(f"  -> Conteúdo extraído: {'OK' if meditation_content_tag else 'FALHOU'}")
+        
+        meditation_content_sanitized = sanitize_text_for_telegram(meditation_content)
 
         youtube_iframe_tag = soup.find("iframe", {"src": lambda src: src and "youtube.com/embed" in src})
         youtube_link = youtube_iframe_tag["src"].split('?')[0].replace("embed/", "watch?v=") if youtube_iframe_tag else ""
+        print(f"  -> Link YouTube: {'OK' if youtube_iframe_tag else 'FALHOU'}")
 
         formatted_text = (
             f"{meditacao_matinal}\n"
             f"{weekday_date}\n\n"
             f"{title_text}\n"
             f"{reference_text_content}\n\n"
-            f"{meditation_content}\n\n"
+            f"{meditation_content_sanitized}\n\n"
             f"{youtube_link}\n\n"
             f"Fonte: {meditation_url}"
         )
+        
+        if not formatted_text.strip():
+            return None, "O scraping resultou em texto vazio."
+            
         return formatted_text.strip(), None
 
     except requests.exceptions.RequestException as e:
-        return None, f"Erro de Request (Scraping): {e} ---> {formatted_text}"
+        return None, f"Erro de Request (Scraping): {e}"
     except Exception as e:
-        return None, f"Erro inesperado (Scraping): {e} ---> {formatted_text}"
+        return None, f"Erro inesperado (Scraping): {e}"
+
 
 def send_telegram_message(text, bot_token, chat_id):
-    """Envia uma mensagem para o Telegram com fallback para texto simples em caso de erro de formatação."""
+    """Envia uma mensagem para o Telegram."""
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     
-    # --- Tentativa 1: Enviar com formatação Markdown ---
     payload = {
         'chat_id': chat_id,
         'text': text,
-        'parse_mode': 'Markdown'
+        'parse_mode': 'MarkdownV2'
     }
     
     try:
         response = requests.post(url, json=payload, timeout=15)
         response.raise_for_status()
-        print(f"Mensagem enviada com SUCESSO (com formatação Markdown) para o Chat ID: {chat_id}")
-        return True, None # Sucesso na primeira tentativa
+        print(f"Mensagem enviada com SUCESSO para o Chat ID: {chat_id}")
+        return True, None
     except requests.exceptions.RequestException as e:
-        # Verifica se o erro é o específico de formatação (parsing)
-        if e.response and e.response.status_code == 400 and "can't parse entities" in e.response.text:
-            print("AVISO: Falha ao enviar com Markdown. Tentando novamente como texto simples...")
-            
-            # --- Tentativa 2: Fallback para texto simples (sem parse_mode) ---
-            payload_sem_formatacao = {
-                'chat_id': chat_id,
-                'text': text # Envia o mesmo texto, mas o Telegram não o irá formatar
-            }
+        error_details = f"Erro de Request (Telegram): {e}"
+        if e.response:
             try:
-                response = requests.post(url, json=payload_sem_formatacao, timeout=15)
-                response.raise_for_status()
-                print(f"Mensagem enviada com SUCESSO (como texto simples) para o Chat ID: {chat_id}")
-                return True, None # Sucesso na segunda tentativa
-            except requests.exceptions.RequestException as fallback_e:
-                error_details = f"Erro de Request (Telegram) mesmo após fallback para texto simples: {fallback_e}"
-                if fallback_e.response and fallback_e.response.text:
-                    error_details += f"\nResposta da API: {fallback_e.response.text}"
-                return False, error_details
-        
-        # Se for outro tipo de erro (ex: rede, timeout), retorna o erro para a lógica de retry
-        else:
-            error_details = f"Erro de Request (Telegram): {e}"
-            if e.response and e.response.text:
+                error_description = e.response.json().get('description', e.response.text)
+                error_details += f"\nResposta da API: {error_description}"
+            except ValueError:
                 error_details += f"\nResposta da API: {e.response.text}"
-            return False, error_details
+        return False, error_details
+
 
 if __name__ == "__main__":
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
@@ -164,7 +161,6 @@ if __name__ == "__main__":
 
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("ERRO CRÍTICO: As variáveis de ambiente do Telegram não foram definidas.")
-        # Se as credenciais do Telegram não existem, notificar por email é a única opção
         send_error_email(
             "Falha Crítica no Bot de Meditações",
             "O bot não pôde ser executado porque as variáveis de ambiente TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID não foram encontradas."
@@ -177,9 +173,8 @@ if __name__ == "__main__":
         ]
 
         for url, title in meditation_sources:
-            print(f"--- Processando: {title} ---")
+            print(f"\n--- Processando: {title} ---")
             
-            # --- LÓGICA DE TENTATIVAS PARA O SCRAPING ---
             scraped_content = None
             last_scrape_error = ""
             for attempt in range(1, MAX_RETRIES + 1):
@@ -199,13 +194,19 @@ if __name__ == "__main__":
                     f"Falha no Scraping da Meditação: {title}",
                     f"O bot não conseguiu extrair o conteúdo para a meditação '{title}'.\n\nÚltimo erro registado:\n{last_scrape_error}"
                 )
-                continue # Passa para a próxima meditação
+                continue
 
-            # --- LÓGICA DE TENTATIVAS PARA O ENVIO AO TELEGRAM ---
+            print(f"Conteúdo final a ser enviado para '{title}':\n--- INÍCIO ---\n{scraped_content}\n--- FIM ---")
+
             send_success = False
             last_send_error = ""
             for attempt in range(1, MAX_RETRIES + 1):
                 print(f"Tentativa de envio para o Telegram nº {attempt}/{MAX_RETRIES} para '{title}'...")
+                if not scraped_content or not scraped_content.strip():
+                    last_send_error = "Tentativa de enviar conteúdo vazio foi bloqueada."
+                    print(last_send_error)
+                    break
+
                 success, error = send_telegram_message(scraped_content, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
                 if success:
                     send_success = True
@@ -216,9 +217,19 @@ if __name__ == "__main__":
 
             if not send_success:
                 print(f"ERRO FINAL: Envio para o Telegram para '{title}' falhou após {MAX_RETRIES} tentativas.")
+                
+                # ALTERADO: Corpo do email agora inclui o texto que falhou o envio
+                email_body = (
+                    f"O bot não conseguiu enviar a meditação '{title}' para o Telegram.\n\n"
+                    f"Último erro registado:\n{last_send_error}\n\n"
+                    f"---\n\nCONTEÚDO QUE FALHOU O ENVIO:\n\n"
+                    f"{scraped_content}"
+                )
+                
                 send_error_email(
                     f"Falha no Envio para o Telegram: {title}",
-                    f"O bot não conseguiu enviar a meditação '{title}' para o Telegram.\n\nÚltimo erro registado:\n{last_send_error}"
+                    email_body
                 )
 
         print("\n--- Processo concluído. ---")
+        
