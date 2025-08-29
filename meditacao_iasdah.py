@@ -104,59 +104,33 @@ def scrape_meditation(base_url, meditacao_matinal_title):
             f"{title_text}\n"
             f"{reference_text_content}\n\n"
             f"{meditation_content}\n\n"
-            f"{youtube_link}\n\n"
-            f"Fonte: {meditation_url}"
+            f"{youtube_link}"
         )
         return formatted_text.strip(), None
 
     except requests.exceptions.RequestException as e:
-        return None, f"Erro de Request (Scraping): {e} ---> {formatted_text}"
+        return None, f"Erro de Request (Scraping): {e}"
     except Exception as e:
-        return None, f"Erro inesperado (Scraping): {e} ---> {formatted_text}"
+        return None, f"Erro inesperado (Scraping): {e}"
 
 def send_telegram_message(text, bot_token, chat_id):
-    """Envia uma mensagem para o Telegram com fallback para texto simples em caso de erro de formatação."""
+    """Envia uma mensagem para o Telegram e retorna um status de sucesso/falha."""
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    
-    # --- Tentativa 1: Enviar com formatação Markdown ---
     payload = {
         'chat_id': chat_id,
         'text': text,
         'parse_mode': 'Markdown'
     }
-    
     try:
         response = requests.post(url, json=payload, timeout=15)
         response.raise_for_status()
-        print(f"Mensagem enviada com SUCESSO (com formatação Markdown) para o Chat ID: {chat_id}")
-        return True, None # Sucesso na primeira tentativa
+        print(f"Mensagem enviada com sucesso para o Telegram (Chat ID: {chat_id})")
+        return True, None
     except requests.exceptions.RequestException as e:
-        # Verifica se o erro é o específico de formatação (parsing)
-        if e.response and e.response.status_code == 400 and "can't parse entities" in e.response.text:
-            print("AVISO: Falha ao enviar com Markdown. Tentando novamente como texto simples...")
-            
-            # --- Tentativa 2: Fallback para texto simples (sem parse_mode) ---
-            payload_sem_formatacao = {
-                'chat_id': chat_id,
-                'text': text # Envia o mesmo texto, mas o Telegram não o irá formatar
-            }
-            try:
-                response = requests.post(url, json=payload_sem_formatacao, timeout=15)
-                response.raise_for_status()
-                print(f"Mensagem enviada com SUCESSO (como texto simples) para o Chat ID: {chat_id}")
-                return True, None # Sucesso na segunda tentativa
-            except requests.exceptions.RequestException as fallback_e:
-                error_details = f"Erro de Request (Telegram) mesmo após fallback para texto simples: {fallback_e}"
-                if fallback_e.response and fallback_e.response.text:
-                    error_details += f"\nResposta da API: {fallback_e.response.text}"
-                return False, error_details
-        
-        # Se for outro tipo de erro (ex: rede, timeout), retorna o erro para a lógica de retry
-        else:
-            error_details = f"Erro de Request (Telegram): {e}"
-            if e.response and e.response.text:
-                error_details += f"\nResposta da API: {e.response.text}"
-            return False, error_details
+        error_details = f"Erro de Request (Telegram): {e}"
+        if 'response' in locals() and response.text:
+            error_details += f"\nResposta da API: {response.text}"
+        return False, error_details
 
 if __name__ == "__main__":
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
