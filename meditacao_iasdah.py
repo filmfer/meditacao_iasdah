@@ -22,6 +22,20 @@ def safe_locale_set():
             print("Aviso: Não foi possível definir o locale para pt_PT. A data pode aparecer em inglês.")
             pass
 
+def format_date_in_portuguese(date_obj):
+    """
+    # NOVO: Formata a data em português, independente do sistema operativo.
+    """
+    dias = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+    meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
+    
+    weekday = dias[date_obj.weekday()]
+    day = date_obj.day
+    month = meses[date_obj.month - 1]
+    
+    return f"{weekday}, {day} de {month}"
+    
+
 def scrape_meditation(base_url, meditacao_matinal_title):
     """Faz o scraping da página da meditação e retorna o texto formatado."""
     try:
@@ -45,11 +59,13 @@ def scrape_meditation(base_url, meditacao_matinal_title):
         meditacao_matinal = f"*{meditacao_matinal_title}*"
 
         safe_locale_set()
+        #today = datetime.date.today()
+        #weekday = today.strftime("%A").capitalize()
+        #day = today.strftime("%d")
+        #month = today.strftime("%B").capitalize()
+        #weekday_date = f"{weekday}, {day} de {month}"
         today = datetime.date.today()
-        weekday = today.strftime("%A").capitalize()
-        day = today.strftime("%d")
-        month = today.strftime("%B").capitalize()
-        weekday_date = f"{weekday}, {day} de {month}"
+        weekday_date = format_date_in_portuguese(today)
 
         title_tag = soup.find("div", class_="mdl-typography--headline")
         title = title_tag.text.strip() if title_tag else "Título não encontrado"
@@ -72,7 +88,8 @@ def scrape_meditation(base_url, meditacao_matinal_title):
             f"{title_text}\n"
             f"{reference_text_content}\n\n"
             f"{meditation_content}\n\n"
-            f"{youtube_link}"
+            f"{youtube_link}\n\n"
+            f"{base_url}"
         )
 
         return formatted_text.strip()
