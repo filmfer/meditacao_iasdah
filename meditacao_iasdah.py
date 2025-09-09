@@ -24,7 +24,7 @@ def safe_locale_set():
 
 def format_date_in_portuguese(date_obj):
     """
-    # NOVO: Formata a data em português, independente do sistema operativo.
+    Formata a data em português, independente do sistema operativo.
     """
     dias = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
     meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
@@ -59,11 +59,6 @@ def scrape_meditation(base_url, meditacao_matinal_title):
         meditacao_matinal = f"*{meditacao_matinal_title}*"
 
         safe_locale_set()
-        #today = datetime.date.today()
-        #weekday = today.strftime("%A").capitalize()
-        #day = today.strftime("%d")
-        #month = today.strftime("%B").capitalize()
-        #weekday_date = f"{weekday}, {day} de {month}"
         today = datetime.date.today()
         weekday_date = format_date_in_portuguese(today)
 
@@ -99,32 +94,46 @@ def scrape_meditation(base_url, meditacao_matinal_title):
     except Exception as e:
         return f"Erro inesperado para {base_url}: {e}"
 
-def send_telegram_message(text, bot_token, chat_id):
-    """Envia uma mensagem de texto para um chat do Telegram usando a API do Bot."""
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-       # O Telegram suporta Markdown para formatação de *negrito* e _itálico_
-    payload = {
-        'chat_id': chat_id,
-        'text': text,
-        'parse_mode': 'Markdown'
+def send_whatsapp_message(text, access_token, phone_number_id, to_number):
+    """
+    Envia uma mensagem de texto para um chat do WhatsApp (pode ser um grupo ou um número individual).
+    """
+    url = f"https://graph.facebook.com/v19.0/{phone_number_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
     }
-    try:
-        response = requests.post(url, json=payload)
-        response.raise_for_status()
-        print(f"Mensagem enviada com sucesso para o Telegram (Chat ID: {chat_id})")
-    except requests.exceptions.RequestException as e:
-        print(f"Falha ao enviar mensagem para o Telegram: {e}")
-        print(f"Resposta da API: {response.text}")
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_number,  # This can be a phone number or a group ID
+        "type": "text",
+        "text": {
+            "body": text  # WhatsApp supports a subset of Markdown (e.g., *bold*, _italic_)
+        },
+    }
 
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
+        print(f"Mensagem enviada com sucesso para o WhatsApp (Destino: {to_number})")
+        # You might want to print the response data for debugging
+        # print(f"API Response: {response.json()}")
+    except requests.exceptions.RequestException as e:
+        print(f"Falha ao enviar mensagem para o WhatsApp: {e}")
+        if response is not None:
+            print(f"Resposta da API: {response.text}")
+    except Exception as e:
+        print(f"Erro inesperado ao enviar mensagem para o WhatsApp: {e}")
 
 if __name__ == "__main__":
-    # Carrega as credenciais do Telegram a partir de variáveis de ambiente
-    # É mais seguro do que colocar diretamente no código
-    TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-    TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+    # Carrega as credenciais do WhatsApp a partir de variáveis de ambiente
+    WHATSAPP_ACCESS_TOKEN = os.getenv('WHATSAPP_ACCESS_TOKEN')
+    WHATSAPP_PHONE_NUMBER_ID = os.getenv('WHATSAPP_PHONE_NUMBER_ID')
+    WHATSAPP_GROUP_ID = os.getenv('WHATSAPP_GROUP_ID') # Or WHATSAPP_RECIPIENT_NUMBER for individual chats
 
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("As variáveis de ambiente TELEGRAM_BOT_TOKEN e TELEGRAM_CHAT_ID não foram definidas.")
+    if not all([WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_GROUP_ID]):
+        print("As variáveis de ambiente WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID e WHATSAPP_GROUP_ID não foram definidas.")
+        print("Por favor, configure-as antes de executar o script.")
     else:
         meditation_sources = [
             ("https://mais.cpb.com.br/meditacoes-diarias/", "Meditação Matinal"),
@@ -137,6 +146,7 @@ if __name__ == "__main__":
             print(f"--- Processando: {title} ---\n{result}\n")
 
             if not result.startswith("Erro"):
-                send_telegram_message(result, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+                # Send to WhatsApp
+                send_whatsapp_message(result, WHATSAPP_ACCESS_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_GROUP_ID)
             else:
                 print(f"A mensagem para '{title}' não foi enviada devido a um erro de scraping.")
