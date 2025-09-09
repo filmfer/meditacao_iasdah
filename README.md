@@ -93,12 +93,18 @@ Bash
 
 export TELEGRAM_BOT_TOKEN="O_SEU_TOKEN_AQUI"
 export TELEGRAM_CHAT_ID="O_SEU_ID_DO_CHAT_AQUI"
+export WHATSAPP_ACCESS_TOKEN="O_SEU_TOKEN_DE_ACESSO_AQUI"
+export WHATSAPP_PHONE_NUMBER_ID="O_SEU_ID_DO_N_TELEMOVEL_AQUI"
+export WHATSAPP_GROUP_ID="O_SEU_ID_DO_GRUPO_AQUI"
 
 No Windows (Command Prompt):
 Bash
 
 set TELEGRAM_BOT_TOKEN="O_SEU_TOKEN_AQUI"
 set TELEGRAM_CHAT_ID="O_SEU_ID_DO_CHAT_AQUI"
+set WHATSAPP_ACCESS_TOKEN="O_SEU_TOKEN_DE_ACESSO_AQUI"
+set WHATSAPP_PHONE_NUMBER_ID="O_SEU_ID_DO_N_TELEMOVEL_AQUI"
+set WHATSAPP_GROUP_ID="O_SEU_ID_DO_GRUPO_AQUI"
 
 ▶️ Executar o Bot Manualmente
 Depois de configurar as variáveis de ambiente, pode testar o script executando-o diretamente no seu terminal:
@@ -145,6 +151,11 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          WHATSAPP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_ACCESS_TOKEN }}
+          WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
+          WHATSAPP_GROUP_ID: ${{ secrets.WHATSAPP_GROUP_ID }}
         run: python seu_script.py # <-- SUBSTITUA PELO NOME DO SEU FICHEIRO
 
 Adicione os Secrets ao GitHub:
@@ -154,6 +165,10 @@ No seu repositório no GitHub, vá a Settings > Secrets and variables > Actions.
 Clique em New repository secret.
 
 Crie um secret chamado TELEGRAM_BOT_TOKEN e cole o seu token.
-Crie outro secret chamado TELEGRAM_CHAT_ID e cole o ID do seu grupo.
+Crie um secret chamado TELEGRAM_CHAT_ID e cole o ID do seu grupo.
+Crie um secret chamado EMAIL_ADDRESS e cole o seu token.
+Crie um secret chamado  WHATSAPP_ACCESS_TOKEN e cole o Token de acesso.
+Crie um secret chamado  WHATSAPP_PHONE_NUMBER_ID e cole o seu ID do seu número de telemóvel.
+Crie um secret chamado  WHATSAPP_GROUP_ID e cole o ID do seu grupo.
 
 E pronto! O seu MeditaBot Diário está configurado para abençoar o seu grupo do Telegram todos os dias. 🎉
