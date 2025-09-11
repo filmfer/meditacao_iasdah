@@ -6,7 +6,6 @@ from email.message import EmailMessage
 import time
 from bs4 import BeautifulSoup
 import datetime
-import locale
 import warnings
 from urllib3.exceptions import InsecureRequestWarning
 
@@ -20,7 +19,7 @@ warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 def format_date_in_portuguese(date_obj):
     """
-    # NOVO: Formata a data em português, independente do sistema operativo.
+    Formata a data em português, independente do sistema operativo.
     """
     dias = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
     meses = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
@@ -55,10 +54,14 @@ def send_error_email(subject, body):
     except Exception as e:
         print(f"Falha catastrófica ao enviar o email de notificação: {e}")
 
-def sanitize_text(text):
-    """Limpa o texto de caracteres que conflituam com o Markdown do Telegram."""
-    # Remove asteriscos e underscores para evitar erros de formatação
-    return text.replace('*', '').replace('_', '')
+# --- NEW FUNCTION ---
+# Replaces the old `sanitize_text` with a more robust escaping function for MarkdownV2.
+def escape_markdown(text: str) -> str:
+    """Escapa caracteres especiais para o modo MarkdownV2 do Telegram."""
+    # Caracteres a serem escapados de acordo com a documentação da API do Telegram
+    escape_chars = r'[]()~`>#+-=|{}.!'
+    # Adiciona uma barra invertida '\' antes de cada caracter especial
+    return "".join(f'\\{char}' if char in escape_chars else char for char in text)
 
 def scrape_meditation(base_url, meditacao_matinal_title):
     """Faz o scraping da página da meditação e retorna o texto formatado."""
@@ -69,7 +72,6 @@ def scrape_meditation(base_url, meditacao_matinal_title):
 
         link_tag = soup.find("a", class_="mdl-button mdl-button--colored mdl-js-button mdl-js-ripple-effect")
         if not link_tag or not link_tag.has_attr("href"):
-            # Retorna None em caso de falha para ser gerido pelo sistema de tentativas
             return None, "Link da meditação diária não encontrado"
 
         meditation_url = link_tag["href"]
@@ -77,24 +79,36 @@ def scrape_meditation(base_url, meditacao_matinal_title):
         response.raise_for_status()
         soup = BeautifulSoup(response.content, "html.parser")
 
+        # --- FIXED ---: Define 'today' inside the function scope.
+        today = format_date_in_portuguese(today)
+
         # Extrai e limpa os textos
-        meditacao_matinal = f"*{meditacao_matinal_title}*"
-        safe_locale_set()
-        weekday_date = format_date_in_portuguese(today)
+        # --- MODIFIED ---: Escape title before adding markdown characters
+        meditacao_matinal = f"*{escape_markdown(meditacao_matinal_title)}*"
+        
+        # --- FIXED ---: The call to safe_locale_set() was removed as it was undefined and not needed.
+        weekday_date = escape_markdown(format_date_in_portuguese(today))
 
         title_tag = soup.find("div", class_="mdl-typography--headline")
-        title = sanitize_text(title_tag.text.strip()) if title_tag else "Título não encontrado"
+        # --- MODIFIED ---: Use the new escape_markdown function
+        title = escape_markdown(title_tag.text.strip()) if title_tag else "Título não encontrado"
         title_text = f"*{title}*"
 
         reference_text_tag = soup.find("div", class_="descriptionText versoBiblico")
-        reference_text = sanitize_text(reference_text_tag.text.strip()) if reference_text_tag else "Verso não encontrado"
+        # --- MODIFIED ---: Use the new escape_markdown function
+        reference_text = escape_markdown(reference_text_tag.text.strip()) if reference_text_tag else "Verso não encontrado"
         reference_text_content = f"_{reference_text}_"
 
         meditation_content_tag = soup.find("div", class_="conteudoMeditacao")
-        meditation_content = sanitize_text(meditation_content_tag.text.strip()) if meditation_content_tag else "Conteúdo não encontrado"
+        # --- MODIFIED ---: Use the new escape_markdown function
+        meditation_content = escape_markdown(meditation_content_tag.text.strip()) if meditation_content_tag else "Conteúdo não encontrado"
 
         youtube_iframe_tag = soup.find("iframe", {"src": lambda src: src and "youtube.com/embed" in src})
         youtube_link = youtube_iframe_tag["src"].split('?')[0].replace("embed/", "watch?v=") if youtube_iframe_tag else ""
+        
+        # We also escape the links to be safe
+        escaped_youtube_link = escape_markdown(youtube_link)
+        escaped_base_url = escape_markdown(base_url)
 
         formatted_text = (
             f"{meditacao_matinal}\n"
@@ -102,8 +116,8 @@ def scrape_meditation(base_url, meditacao_matinal_title):
             f"{title_text}\n\n"
             f"{reference_text_content}\n\n"
             f"{meditation_content}\n\n"
-            f"{youtube_link}\n\n"
-            f"{base_url}"
+            f"{escaped_youtube_link}\n\n"
+            f"{escaped_base_url}"
         )
         return formatted_text.strip(), None
 
@@ -118,7 +132,8 @@ def send_telegram_message(text, bot_token, chat_id):
     payload = {
         'chat_id': chat_id,
         'text': text,
-        'parse_mode': 'Markdown'
+        # --- MODIFIED ---: Switched to the more modern and reliable MarkdownV2 parser.
+        'parse_mode': 'MarkdownV2'
     }
     try:
         response = requests.post(url, json=payload, timeout=15)
@@ -127,7 +142,8 @@ def send_telegram_message(text, bot_token, chat_id):
         return True, None
     except requests.exceptions.RequestException as e:
         error_details = f"Erro de Request (Telegram): {e}"
-        if 'response' in locals() and response.text:
+        # MODIFIED: Check if response object exists before accessing its text
+        if 'response' in locals() and hasattr(response, 'text') and response.text:
             error_details += f"\nResposta da API: {response.text}"
         return False, error_details
 
@@ -137,7 +153,6 @@ if __name__ == "__main__":
 
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("ERRO CRÍTICO: As variáveis de ambiente do Telegram não foram definidas.")
-        # Se as credenciais do Telegram não existem, notificar por email é a única opção
         send_error_email(
             "Falha Crítica no Bot de Meditações",
             "O bot não pôde ser executado porque as variáveis de ambiente TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID não foram encontradas."
@@ -152,7 +167,6 @@ if __name__ == "__main__":
         for url, title in meditation_sources:
             print(f"--- Processando: {title} ---")
             
-            # --- LÓGICA DE TENTATIVAS PARA O SCRAPING ---
             scraped_content = None
             last_scrape_error = ""
             for attempt in range(1, MAX_RETRIES + 1):
@@ -172,9 +186,8 @@ if __name__ == "__main__":
                     f"Falha no Scraping da Meditação: {title}",
                     f"O bot não conseguiu extrair o conteúdo para a meditação '{title}'.\n\nÚltimo erro registado:\n{last_scrape_error}"
                 )
-                continue # Passa para a próxima meditação
+                continue
 
-            # --- LÓGICA DE TENTATIVAS PARA O ENVIO AO TELEGRAM ---
             send_success = False
             last_send_error = ""
             for attempt in range(1, MAX_RETRIES + 1):
