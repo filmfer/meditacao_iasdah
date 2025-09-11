@@ -124,7 +124,7 @@ def send_telegram_message(text, bot_token, chat_id):
         'chat_id': chat_id,
         'text': text,
         # --- MODIFIED ---: Re-enabled MarkdownV2 to render the formatting.
-        'parse_mode': 'MarkdownV2'
+        'parse_mode': 'Markdown'
     }
     try:
         response = requests.post(url, json=payload, timeout=15)
