@@ -54,14 +54,7 @@ def send_error_email(subject, body):
     except Exception as e:
         print(f"Falha catastrófica ao enviar o email de notificação: {e}")
 
-# --- NEW FUNCTION ---
-# Replaces the old `sanitize_text` with a more robust escaping function for MarkdownV2.
-def escape_markdown(text: str) -> str:
-    """Escapa caracteres especiais para o modo MarkdownV2 do Telegram."""
-    # Caracteres a serem escapados de acordo com a documentação da API do Telegram
-    escape_chars = r'[]()~`>#+-=|{}.!'
-    # Adiciona uma barra invertida '\' antes de cada caracter especial
-    return "".join(f'\\{char}' if char in escape_chars else char for char in text)
+# --- REMOVED --- The sanitize/escape function is no longer needed.
 
 def scrape_meditation(base_url, meditacao_matinal_title):
     """Faz o scraping da página da meditação e retorna o texto formatado."""
@@ -80,35 +73,23 @@ def scrape_meditation(base_url, meditacao_matinal_title):
         soup = BeautifulSoup(response.content, "html.parser")
 
         # --- FIXED ---: Define 'today' inside the function scope.
-        today = format_date_in_portuguese(today)
+        today = datetime.date.today()
 
-        # Extrai e limpa os textos
-        # --- MODIFIED ---: Escape title before adding markdown characters
-        meditacao_matinal = f"*{escape_markdown(meditacao_matinal_title)}*"
-        
-        # --- FIXED ---: The call to safe_locale_set() was removed as it was undefined and not needed.
-        weekday_date = escape_markdown(format_date_in_portuguese(today))
+        # --- MODIFIED ---: Removed all Markdown characters (* and _) for a cleaner plain text message.
+        meditacao_matinal = meditacao_matinal_title
+        weekday_date = format_date_in_portuguese(today)
 
         title_tag = soup.find("div", class_="mdl-typography--headline")
-        # --- MODIFIED ---: Use the new escape_markdown function
-        title = escape_markdown(title_tag.text.strip()) if title_tag else "Título não encontrado"
-        title_text = f"*{title}*"
+        title_text = title_tag.text.strip() if title_tag else "Título não encontrado"
 
         reference_text_tag = soup.find("div", class_="descriptionText versoBiblico")
-        # --- MODIFIED ---: Use the new escape_markdown function
-        reference_text = escape_markdown(reference_text_tag.text.strip()) if reference_text_tag else "Verso não encontrado"
-        reference_text_content = f"_{reference_text}_"
+        reference_text_content = reference_text_tag.text.strip() if reference_text_tag else "Verso não encontrado"
 
         meditation_content_tag = soup.find("div", class_="conteudoMeditacao")
-        # --- MODIFIED ---: Use the new escape_markdown function
-        meditation_content = escape_markdown(meditation_content_tag.text.strip()) if meditation_content_tag else "Conteúdo não encontrado"
+        meditation_content = meditation_content_tag.text.strip() if meditation_content_tag else "Conteúdo não encontrado"
 
         youtube_iframe_tag = soup.find("iframe", {"src": lambda src: src and "youtube.com/embed" in src})
         youtube_link = youtube_iframe_tag["src"].split('?')[0].replace("embed/", "watch?v=") if youtube_iframe_tag else ""
-        
-        # We also escape the links to be safe
-        escaped_youtube_link = escape_markdown(youtube_link)
-        escaped_base_url = escape_markdown(base_url)
 
         formatted_text = (
             f"{meditacao_matinal}\n"
@@ -116,8 +97,8 @@ def scrape_meditation(base_url, meditacao_matinal_title):
             f"{title_text}\n\n"
             f"{reference_text_content}\n\n"
             f"{meditation_content}\n\n"
-            f"{escaped_youtube_link}\n\n"
-            f"{escaped_base_url}"
+            f"{youtube_link}\n\n"
+            f"{base_url}"
         )
         return formatted_text.strip(), None
 
@@ -132,8 +113,8 @@ def send_telegram_message(text, bot_token, chat_id):
     payload = {
         'chat_id': chat_id,
         'text': text,
-        # --- MODIFIED ---: Switched to the more modern and reliable MarkdownV2 parser.
-        'parse_mode': 'MarkdownV2'
+        # --- MODIFIED ---: The 'parse_mode' key has been completely removed.
+        # Telegram will now send this as plain text by default, avoiding all Markdown errors.
     }
     try:
         response = requests.post(url, json=payload, timeout=15)
@@ -142,7 +123,6 @@ def send_telegram_message(text, bot_token, chat_id):
         return True, None
     except requests.exceptions.RequestException as e:
         error_details = f"Erro de Request (Telegram): {e}"
-        # MODIFIED: Check if response object exists before accessing its text
         if 'response' in locals() and hasattr(response, 'text') and response.text:
             error_details += f"\nResposta da API: {response.text}"
         return False, error_details
