@@ -143,7 +143,6 @@ if __name__ == "__main__":
         print("ERRO CRÍTICO: As variáveis de ambiente do Telegram não foram definidas.")
         send_error_email(
             "Falha Crítica no Bot de Meditações",
-            "Erro em abrir meditation_url",
             "O bot não pôde ser executado porque as variáveis de ambiente TELEGRAM_BOT_TOKEN ou TELEGRAM_CHAT_ID não foram encontradas."
         )
     else:
