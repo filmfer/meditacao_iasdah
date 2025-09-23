@@ -11,7 +11,7 @@ from urllib3.exceptions import InsecureRequestWarning
 
 # --- CONFIGURAÇÕES ---
 MAX_RETRIES = 3
-RETRY_DELAY_SECONDS = 15
+RETRY_DELAY_SECONDS = 10
 EMAIL_RECEIVER = "filmfer@gmail.com"
 
 # Suprime avisos de SSL explicitamente
@@ -23,8 +23,8 @@ def clean_scraped_text(text: str) -> str:
     Remove sequências de caracteres indesejadas do texto extraído.
     Remove as sequências " /" e " \".
     """
-    text = text.replace(" /", "")
-    text = text.replace(" \\", "")
+    text = text.replace(" /", " ")
+    #text = text.replace(" \\", "")
     return text
 
 def format_date_in_portuguese(date_obj):
