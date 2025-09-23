@@ -87,11 +87,11 @@ def scrape_meditation(base_url, meditacao_matinal_title):
 
         # APLICA A LIMPEZA DO TEXTO AO EXTRAIR
         title_tag = soup.find("div", class_="mdl-typography--headline")
-        title = clean_scraped_text(title_tag.text.strip()) if title_tag else "Título não encontrado"
+        title = title_tag.text.strip() if title_tag else "Título não encontrado"
         title_text = f"*{title}*"
 
         reference_text_tag = soup.find("div", class_="descriptionText versoBiblico")
-        reference_text = clean_scraped_text(reference_text_tag.text.strip()) if reference_text_tag else "Verso não encontrado"
+        reference_text = reference_text_tag.text.strip() if reference_text_tag else "Verso não encontrado"
         reference_text_content = f"_{reference_text}_"
 
         meditation_content_tag = soup.find("div", class_="conteudoMeditacao")
