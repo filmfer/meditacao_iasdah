@@ -44,4 +44,4 @@ jobs:
           WHATSAPP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_PHONE_NUMBER_ID }}
           WHATSAPP_GROUP_ID: ${{ secrets.WHATSAPP_GROUP_ID }}
 
-        run: python meditacao_iasdah.py
+        run: python meditacao_iasdah_ok2.py
