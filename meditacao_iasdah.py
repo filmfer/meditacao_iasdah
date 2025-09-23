@@ -108,7 +108,7 @@ def scrape_meditation(base_url, meditacao_matinal_title):
             f"{reference_text_content}\n\n"
             f"{meditation_content}\n\n"
             f"{youtube_link}\n\n"
-            f"{base_url}"
+            f"{meditation_url}\n\n"
         )
         return formatted_text.strip(), None
 
