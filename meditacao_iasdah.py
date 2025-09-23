@@ -67,7 +67,7 @@ def clean_scraped_text(text: str) -> str:
     Remove sequências de caracteres indesejadas do texto extraído.
     Remove as sequências " /" e " \".
     """
-    #text = text.replace(" /", "")
+    text = text.replace(" /", "")
     text = text.replace(" \\", "")
     return text
 
@@ -103,7 +103,7 @@ def scrape_meditation(base_url, meditacao_matinal_title):
         reference_text_content = f"_{reference_text}_"
 
         meditation_content_tag = soup.find("div", class_="conteudoMeditacao")
-        meditation_content = clean_scraped_text(meditation_content_tag.text.strip()) if meditation_content_tag else "Conteúdo não encontrado"
+        meditation_content = meditation_content_tag.text.strip() if meditation_content_tag else "Conteúdo não encontrado"
 
         youtube_iframe_tag = soup.find("iframe", {"src": lambda src: src and "youtube.com/embed" in src})
         youtube_link = youtube_iframe_tag["src"].split('?')[0].replace("embed/", "watch?v=") if youtube_iframe_tag else ""
