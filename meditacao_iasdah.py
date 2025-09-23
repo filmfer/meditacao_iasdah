@@ -68,7 +68,7 @@ def clean_scraped_text(text: str) -> str:
     Remove as sequências " /" e " \".
     """
     text = text.replace(" /", "")
-    #text = text.replace(" \\", "")
+    text = text.replace(" \\", "")
     return text
 
 def scrape_meditation(base_url, meditacao_matinal_title):
@@ -134,7 +134,7 @@ def send_telegram_message(text, bot_token, chat_id):
         'chat_id': chat_id,
         'text': text,
         # --- MODIFIED ---: Re-enabled MarkdownV2 to render the formatting.
-        'parse_mode': 'Markdown'
+        'parse_mode': 'MarkdownV2'
     }
     try:
         response = requests.post(url, json=payload, timeout=15)
@@ -204,7 +204,6 @@ if __name__ == "__main__":
                 print(f"ERRO FINAL: Envio para o Telegram para '{title}' falhou após {MAX_RETRIES} tentativas.")
                 send_error_email(
                     f"Falha no Envio para o Telegram: {title}",
-                    f"Falha ao aceder a {meditation_url}",
                     f"O bot não conseguiu enviar a meditação '{title}' para o Telegram.\n\nÚltimo erro registado:\n{last_send_error}"
                 )
 
