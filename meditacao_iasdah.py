@@ -62,14 +62,14 @@ def send_error_email(subject, body):
 #    return "".join(f'\\{char}' if char in escape_chars else char for char in text)
 
 # --- FUNÇÃO DE LIMPEZA ADICIONADA ---
-def clean_scraped_text(text: str) -> str:
-    """
-    Remove sequências de caracteres indesejadas do texto extraído.
-    Remove as sequências " /" e " \".
-    """
-    text = text.replace(" /", "")
-    text = text.replace(" \\", "")
-    return text
+#def clean_scraped_text(text: str) -> str:
+#    """
+#    Remove sequências de caracteres indesejadas do texto extraído.
+#    Remove as sequências " /" e " \".
+#    """
+#    text = text.replace(" /", "")
+#    text = text.replace(" \\", "")
+#    return text
 
 def scrape_meditation(base_url, meditacao_matinal_title):
     """Faz o scraping da página da meditação e retorna o texto formatado."""
@@ -99,7 +99,7 @@ def scrape_meditation(base_url, meditacao_matinal_title):
         title_text = f"*{title}*"
 
         reference_text_tag = soup.find("div", class_="descriptionText versoBiblico")
-        reference_text = clean_scraped_text(reference_text_tag.text.strip()) if reference_text_tag else "Verso não encontrado"
+        reference_text = reference_text_tag.text.strip() if reference_text_tag else "Verso não encontrado"
         reference_text_content = f"_{reference_text}_"
 
         meditation_content_tag = soup.find("div", class_="conteudoMeditacao")
