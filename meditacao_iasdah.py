@@ -67,8 +67,8 @@ def clean_scraped_text(text: str) -> str:
     Remove sequências de caracteres indesejadas do texto extraído.
     Remove as sequências " /" e " \".
     """
-    text = text.replace(" /", "")
-    #text = text.replace(" \\", "")
+    #text = text.replace(" /", "")
+    text = text.replace(" \\", "")
     return text
 
 def scrape_meditation(base_url, meditacao_matinal_title):
