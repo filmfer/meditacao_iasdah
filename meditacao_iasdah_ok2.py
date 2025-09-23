@@ -106,7 +106,7 @@ def scrape_meditation(base_url, meditacao_matinal_title):
         formatted_text = (
             f"{meditacao_matinal}\n"
             f"{weekday_date}\n\n"
-            f"{title_text}\n\n"
+            f"{title_text}\n"
             f"{reference_text_content}\n\n"
             f"{meditation_content}\n\n"
             f"{youtube_link}\n\n"
