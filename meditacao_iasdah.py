@@ -10,8 +10,8 @@ import warnings
 from urllib3.exceptions import InsecureRequestWarning
 
 # --- CONFIGURAÇÕES ---
-MAX_RETRIES = 5
-RETRY_DELAY_SECONDS = 60
+MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 15
 EMAIL_RECEIVER = "filmfer@gmail.com"
 
 # Suprime avisos de SSL explicitamente
@@ -194,6 +194,7 @@ if __name__ == "__main__":
                 print(f"ERRO FINAL: Envio para o Telegram para '{title}' falhou após {MAX_RETRIES} tentativas.")
                 send_error_email(
                     f"Falha no Envio para o Telegram: {title}",
+                    f"Falha ao aceder a {meditation_url}",
                     f"O bot não conseguiu enviar a meditação '{title}' para o Telegram.\n\nÚltimo erro registado:\n{last_send_error}"
                 )
 
