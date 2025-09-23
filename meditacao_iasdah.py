@@ -68,7 +68,7 @@ def clean_scraped_text(text: str) -> str:
     Remove as sequências " /" e " \".
     """
     text = text.replace(" /", "")
-    text = text.replace(" \\", "")
+    #text = text.replace(" \\", "")
     return text
 
 def scrape_meditation(base_url, meditacao_matinal_title):
@@ -99,7 +99,7 @@ def scrape_meditation(base_url, meditacao_matinal_title):
         title_text = f"*{title}*"
 
         reference_text_tag = soup.find("div", class_="descriptionText versoBiblico")
-        reference_text = reference_text_tag.text.strip() if reference_text_tag else "Verso não encontrado"
+        reference_text = clean_scraped_text(reference_text_tag.text.strip()) if reference_text_tag else "Verso não encontrado"
         reference_text_content = f"_{reference_text}_"
 
         meditation_content_tag = soup.find("div", class_="conteudoMeditacao")
