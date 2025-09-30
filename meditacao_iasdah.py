@@ -56,20 +56,20 @@ def send_error_email(subject, body):
 
 # --- NEW FUNCTION ---
 # This helper function is necessary to use Markdown safely.
-#def escape_markdown(text: str) -> str:
-#    """Escapa caracteres especiais para o modo MarkdownV2 do Telegram."""
-#    escape_chars = r'_*[]()~`>#+-=|{}.!'
-#    return "".join(f'\\{char}' if char in escape_chars else char for char in text)
+def escape_markdown(text: str) -> str:
+    """Escapa caracteres especiais para o modo MarkdownV2 do Telegram."""
+    escape_chars = r'_*[]()~`>#+-=|{}.!'
+    return "".join(f'\\{char}' if char in escape_chars else char for char in text)
 
 # --- FUNÇÃO DE LIMPEZA ADICIONADA ---
-#def clean_scraped_text(text: str) -> str:
-#    """
-#    Remove sequências de caracteres indesejadas do texto extraído.
-#    Remove as sequências " /" e " \".
-#    """
-#    text = text.replace(" /", "")
-#    text = text.replace(" \\", "")
-#    return text
+def clean_scraped_text(text: str) -> str:
+    """
+    Remove sequências de caracteres indesejadas do texto extraído.
+    Remove as sequências " /" e " \".
+    """
+    text = text.replace(" /", "")
+    text = text.replace(" \\", "")
+    return text
 
 def scrape_meditation(base_url, meditacao_matinal_title):
     """Faz o scraping da página da meditação e retorna o texto formatado."""
@@ -91,25 +91,29 @@ def scrape_meditation(base_url, meditacao_matinal_title):
 
         # --- MODIFIED ---: Re-added Markdown formatting (* for bold, _ for italic)
         # All scraped text is now escaped before formatting is applied.
-        meditacao_matinal = f"*{meditacao_matinal_title}*"
-        weekday_date = format_date_in_portuguese(today)
+        meditacao_matinal = f"*{escape_markdown(meditacao_matinal_title)}*"
+        weekday_date = escape_markdown(format_date_in_portuguese(today))
 
         title_tag = soup.find("div", class_="mdl-typography--headline")
         title = title_tag.text.strip() if title_tag else "Título não encontrado"
-        title_text = f"*{title}*"
+        title = clean_scraped_text(title)
+        title_text = f"*{escape_markdown(title)}*"
 
         reference_text_tag = soup.find("div", class_="descriptionText versoBiblico")
         reference_text = reference_text_tag.text.strip() if reference_text_tag else "Verso não encontrado"
-        reference_text_content = f"_{reference_text}_"
+        reference_text = clean_scraped_text(reference_text)
+        reference_text_content = f"_{escape_markdown(reference_text)}_"
 
         meditation_content_tag = soup.find("div", class_="conteudoMeditacao")
         meditation_content = meditation_content_tag.text.strip() if meditation_content_tag else "Conteúdo não encontrado"
+        meditation_content = clean_scraped_text(meditation_content)
+        meditation_content = escape_markdown(meditation_content)
 
         youtube_iframe_tag = soup.find("iframe", {"src": lambda src: src and "youtube.com/embed" in src})
         youtube_link = youtube_iframe_tag["src"].split('?')[0].replace("embed/", "watch?v=") if youtube_iframe_tag else ""
         
-        #escaped_youtube_link = escape_markdown(youtube_link)
-        #escaped_base_url = escape_markdown(base_url)
+        escaped_youtube_link = escape_markdown(youtube_link)
+        escaped_meditation_url = escape_markdown(meditation_url)
 
         formatted_text = (
             f"{meditacao_matinal}\n"
@@ -117,8 +121,8 @@ def scrape_meditation(base_url, meditacao_matinal_title):
             f"{title_text}\n\n"
             f"{reference_text_content}\n\n"
             f"{meditation_content}\n\n"
-            f"{youtube_link}\n\n"
-            f"{meditation_url}\n\n"
+            f"{escaped_youtube_link}\n\n"
+            f"{escaped_meditation_url}\n\n"
         )
         return formatted_text.strip(), None
 
