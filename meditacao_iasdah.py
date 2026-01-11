@@ -11,7 +11,7 @@ from urllib3.exceptions import InsecureRequestWarning
 
 # --- CONFIGURAÇÕES ---
 MAX_RETRIES = 3
-RETRY_DELAY_SECONDS = 15
+RETRY_DELAY_SECONDS = 20
 EMAIL_RECEIVER = "filmfer@gmail.com"
 
 # Suprime avisos de SSL explicitamente
