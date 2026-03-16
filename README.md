@@ -158,5 +158,6 @@ Clique em New repository secret.
 Crie um secret chamado TELEGRAM_BOT_TOKEN e cole o seu token.
 Crie um secret chamado TELEGRAM_CHAT_ID e cole o ID do seu grupo.
 Crie um secret chamado EMAIL_ADDRESS e cole o seu token.
+P.S.: Sistema para grupos do Whatsapp, disponível em breve.
 
 E pronto! O seu MeditaBot Diário está configurado para abençoar o seu grupo do Telegram todos os dias. 🎉
