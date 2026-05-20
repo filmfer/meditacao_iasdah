@@ -77,7 +77,7 @@ jobs:
       # --- NOVO: Backup do estado atualizado da sessão. Só roda se tudo der 100% certo ---
       - name: Guardar Estado Atualizado da Sessão do WhatsApp
         if: success()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: whatsapp-session
           path: ./.wwebjs_auth
