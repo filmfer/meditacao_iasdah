@@ -49,7 +49,7 @@ client.on('ready', async () => {
     // Remove o separador decorativo final para o envio ficar limpo
     message = message.trim().replace(/\n\n={30}\n\n$/, '');
 
-    const groupId = process.env.WA_GROUP_ID;
+    const groupId = process.env.WHATSAPP_GROUP_ID;
     if (!groupId) {
         console.error('Abort: WA_GROUP_ID environment variable is missing.');
         client.destroy();
