@@ -1,0 +1,84 @@
+name: Publicar Meditação Diária no Telegram e WhatsApp
+
+on:
+  schedule:
+    # Executa às 06:16 UTC todos os dias.
+    # Como os Açores no horário de inverno/verão mudam, o cron foi mantido exatamente igual ao seu original.
+    - cron: '16 6 * * *'
+  # Permite também executar manualmente a partir do separador Actions no GitHub
+  workflow_dispatch:
+
+jobs:
+  build-and-send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out a cópia do repositório
+        uses: actions/checkout@v3
+
+      - name: Configurar o Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      # --- MANTIDO DO SEU ORIGINAL: Configuração crucial de regionalização ---
+      - name: Instalar o locale de Português Europeu (pt_PT)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y language-pack-pt
+          sudo locale-gen pt_PT.UTF-8
+          sudo update-locale LANG=pt_PT.UTF-8
+
+      # --- NOVO: Adicionado ambiente Node.js necessário para o motor do WhatsApp ---
+      - name: Configurar o Node.js Environment
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      # --- NOVO: Restauração automática da sessão do WhatsApp gerada no dia anterior ---
+      - name: Restaurar o Estado da Sessão do WhatsApp
+        uses: dawidd6/action-download-artifact@v2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: meditacao_diaria.yml
+          name: whatsapp-session
+          path: ./.wwebjs_auth
+          if_no_artifact_found: warn
+
+      # --- ATUALIZADO: Mescladas dependências originais do Python com as novas do Node.js ---
+      - name: Instalar dependências (Python & Node.js)
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 urllib3
+          npm install whatsapp-web.js qrcode-terminal
+
+      # --- ATUALIZADO: Executa o scraping principal e envia ao Telegram ---
+      - name: Executar o script de publicação (Scraping & Telegram)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: python scrape_and_send.py  # <-- Altere aqui se o nome do seu script Python principal for diferente
+
+      # --- NOVO: Passo que injeta a automação headless para enviar ao grupo do WhatsApp ---
+      - name: Executar envio automatizado para o WhatsApp
+        env:
+          WA_GROUP_ID: ${{ secrets.WA_GROUP_ID }}
+        run: node send_whatsapp.js
+
+      # --- NOVO: Interceptador de Erros. Dispara se o passo anterior do WhatsApp falhar ---
+      - name: Interceptar e Tratar Alerta de Sessão Expirada
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_PERSONAL_CHAT_ID: ${{ secrets.TELEGRAM_PERSONAL_CHAT_ID }}
+        run: python alert_failure.py
+
+      # --- NOVO: Backup do estado atualizado da sessão. Só roda se tudo der 100% certo ---
+      - name: Guardar Estado Atualizado da Sessão do WhatsApp
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: whatsapp-session
+          path: ./.wwebjs_auth
+          retention-days: 2
