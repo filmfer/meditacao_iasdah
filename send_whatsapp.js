@@ -1,7 +1,7 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const fs = require('fs');
 
-// Inicializa o cliente apontando para a diretoria persistente carregada via Artifacts
+// Inicializa o cliente com argumentos de infraestrutura robustos para o GitHub Actions
 const client = new Client({
     authStrategy: new LocalAuth({
         dataPath: './.wwebjs_auth'
@@ -11,24 +11,23 @@ const client = new Client({
         args: [
             '--no-sandbox', 
             '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage', // Evita que o Linux fique sem memória temporária
+            '--disable-dev-shm-usage', 
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--disable-gpu' // Servidores do GitHub não têm placa gráfica
+            '--disable-gpu'
         ]
     }
 });
 
-// Captura se a sessão caiu. Se cair, força o encerramento com erro para disparar o pipeline de alerta
+// Captura se a sessão caiu. Se cair, desenha o QR Code e aguarda 60 segundos
 client.on('qr', (qr) => {
     console.error('CRITICAL ERROR: WhatsApp session has expired or was disconnected!');
     console.log('A new QR code session initialization is required.');
     
-    // --- CORRIGIDO AQUI (Adicionado o parâmetro inverse: true) ---
     require('qrcode-terminal').generate(qr, { small: true, inverse: true });
-
-    // Damos uma pequena folga de 60 segundos para conseguires escanear antes de fechar o processo
+    
+    // Mantém o terminal aberto por 60 segundos para dar tempo de escanear
     setTimeout(() => {
         client.destroy();
         process.exit(1); 
@@ -45,13 +44,12 @@ client.on('ready', async () => {
     }
 
     let message = fs.readFileSync('whatsapp_msg.txt', 'utf8');
-    
-    // Remove o separador decorativo final para o envio ficar limpo
     message = message.trim().replace(/\n\n={30}\n\n$/, '');
 
+    // --- CORRIGIDO: Agora usa exatamente o nome da tua variável do GitHub ---
     const groupId = process.env.WHATSAPP_GROUP_ID;
     if (!groupId) {
-        console.error('Abort: WA_GROUP_ID environment variable is missing.');
+        console.error('Abort: WHATSAPP_GROUP_ID environment variable is missing.');
         client.destroy();
         process.exit(1);
     }
