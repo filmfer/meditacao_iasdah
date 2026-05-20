@@ -63,7 +63,7 @@ jobs:
       # --- NOVO: Passo que injeta a automação headless para enviar ao grupo do WhatsApp ---
       - name: Executar envio automatizado para o WhatsApp
         env:
-          WA_GROUP_ID: ${{ secrets.WA_GROUP_ID }}
+          WHATSAPP_GROUP_ID: ${{ secrets.WHATSAPP_GROUP_ID }}
         run: node send_whatsapp.js
 
       # --- NOVO: Interceptador de Erros. Dispara-se o passo anterior do WhatsApp falhar ---
