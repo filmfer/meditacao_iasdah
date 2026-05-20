@@ -169,6 +169,7 @@ if __name__ == "__main__":
             telegram_content = None
             whatsapp_content = None
             last_scrape_error = ""
+            conteudos_whatsapp = []
             
             for attempt in range(1, MAX_RETRIES + 1):
                 print(f"Tentativa de scraping nº {attempt}/{MAX_RETRIES} para '{title}'...")
@@ -211,8 +212,14 @@ if __name__ == "__main__":
                 )
 
             # --- SALVAR PAYLOAD DO WHATSAPP ---
-            # Guardamos as três meditações concatenadas estruturalmente num ficheiro de texto local único
-            with open("whatsapp_msg.txt", "a", encoding="utf-8") as f:
-                f.write(whatsapp_content + "\n\n" + "="*30 + "\n\n")
-
-        print("\n--- Processo de Scraping e Envio Telegram Concluído. ---")
+            # Exemplo de como deves acumular as meditações (ajusta conforme as tuas variáveis de loop):
+            # Para cada meditação processada com sucesso:
+            # texto_formatado = f"*{titulo}*\n\n{corpo}\n\n{link_youtube}"
+            # conteudos_whatsapp.append(texto_formatado)
+            
+            # NOTA: Certifica-te de que o teu script Python une a lista usando o separador abaixo:
+            with open("whatsapp_msg.txt", "w", encoding="utf-8") as f:
+                # Une as meditações com a tag especial de divisão
+                f.write("===DIVISAO_MEDITACAO===\n".join(conteudos_whatsapp))
+            
+            print("Payload segmentado guardado para o WhatsApp com sucesso.")
