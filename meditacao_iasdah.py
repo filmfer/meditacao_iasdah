@@ -13,6 +13,8 @@ from urllib3.exceptions import InsecureRequestWarning
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 20
 EMAIL_RECEIVER = "filmfer@gmail.com"
+# Limpa o ficheiro do WhatsApp a cada nova execução diária
+open("whatsapp_msg.txt", "w", encoding="utf-8").close()
 
 # Suprime avisos de SSL explicitamente
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
@@ -218,8 +220,7 @@ if __name__ == "__main__":
             # conteudos_whatsapp.append(texto_formatado)
             
             # NOTA: Certifica-te de que o teu script Python une a lista usando o separador abaixo:
-            with open("whatsapp_msg.txt", "w", encoding="utf-8") as f:
-                # Une as meditações com a tag especial de divisão
-                f.write("===DIVISAO_MEDITACAO===\n".join(conteudos_whatsapp))
+            with open("whatsapp_msg.txt", "a", encoding="utf-8") as f:
+                f.write(telegram_content + "\n\n===DIVISAO_MEDITACAO===\n\n")
             
-            print("Payload segmentado guardado para o WhatsApp com sucesso.")
+            print(f"Meditação '{title}' segmentada e preparada para o WhatsApp com sucesso.")
