@@ -22,17 +22,18 @@ const client = new Client({
 
 // Intercetador de segurança: Se a sessão cair no futuro, gera o QR Code e avisa o Telegram
 client.on('qr', (qr) => {
-    console.error('CRITICAL ERROR: WhatsApp session has expired or was disconnected!');
-    console.log('A new QR code session initialization is required.');
+    console.error('AVISO DE INFRAESTRUTURA: Nenhuma sessão ativa encontrada ou a sessão expirou.');
+    console.log('A gerar novo QR Code obrigatório. Por favor escaneia no ecrã abaixo:');
     
-    // Renderiza com cores invertidas para facilitar a leitura da câmara do telemóvel
+    // Força a impressão correta com cores invertidas
     require('qrcode-terminal').generate(qr, { small: true, inverse: true });
     
-    // Mantém o processo aberto por 60 segundos para dar tempo de escanear antes de falhar
+    // Deixa o ecrã congelado por 90 segundos para te dar tempo de escanear antes de avançar
     setTimeout(() => {
+        console.log('Tempo limite de scan atingido.');
         client.destroy();
         process.exit(1); 
-    }, 60000);
+    }, 90000);
 });
 
 // Execução principal quando o cliente está autenticado e pronto
