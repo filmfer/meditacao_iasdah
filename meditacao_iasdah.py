@@ -171,8 +171,7 @@ if __name__ == "__main__":
             telegram_content = None
             whatsapp_content = None
             last_scrape_error = ""
-            conteudos_whatsapp = []
-            
+              
             for attempt in range(1, MAX_RETRIES + 1):
                 print(f"Tentativa de scraping nº {attempt}/{MAX_RETRIES} para '{title}'...")
                 t_content, w_content, error = scrape_meditation(url, title)
