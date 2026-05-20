@@ -1,6 +1,7 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const fs = require('fs');
 
+// Inicializa o cliente com argumentos estáveis para o ambiente Linux do GitHub Actions
 const client = new Client({
     authStrategy: new LocalAuth({
         dataPath: './.wwebjs_auth'
@@ -19,98 +20,75 @@ const client = new Client({
     }
 });
 
-// Função auxiliar de limpeza para correspondência de nomes em Comunidades
-String.prototype.stripCustom = function() {
-    return this.trim().toLowerCase().replace(/[\u200B-\u200D\uFEFF]/g, "");
-};
-
-// Se por algum motivo a sessão cair no futuro, ele avisa e gera o QR
+// Intercetador de segurança: Se a sessão cair no futuro, gera o QR Code e avisa o Telegram
 client.on('qr', (qr) => {
     console.error('CRITICAL ERROR: WhatsApp session has expired or was disconnected!');
+    console.log('A new QR code session initialization is required.');
+    
+    // Renderiza com cores invertidas para facilitar a leitura da câmara do telemóvel
     require('qrcode-terminal').generate(qr, { small: true, inverse: true });
-    setTimeout(() => { client.destroy(); process.exit(1); }, 60000);
+    
+    // Mantém o processo aberto por 60 segundos para dar tempo de escanear antes de falhar
+    setTimeout(() => {
+        client.destroy();
+        process.exit(1); 
+    }, 60000);
 });
 
+// Execução principal quando o cliente está autenticado e pronto
 client.on('ready', async () => {
     console.log('WhatsApp Client connection established successfully!');
-    console.log('Waiting 5 seconds for the interface to stabilize...');
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    console.log('Waiting 20 seconds for the interface to stabilize...');
     
+    // Pausa de segurança crucial para mitigar ecrãs de boas-vindas da Meta
+    await new Promise(resolve => setTimeout(resolve, 20000));
+    
+    // Valida a existência do payload de texto gerado pelo Python
     if (!fs.existsSync('whatsapp_msg.txt')) {
-        console.error('Abort: whatsapp_msg.txt not found.');
+        console.error('Abort: whatsapp_msg.txt output payload not found.');
         client.destroy();
         process.exit(1);
     }
 
+    // Lê e limpa o texto das meditações
     let message = fs.readFileSync('whatsapp_msg.txt', 'utf8');
     message = message.trim().replace(/\n\n={30}\n\n$/, '').trim();
 
     if (!message) {
-        console.error('Abort: Message payload is empty.');
+        console.error('Abort: Message payload is empty after cleaning.');
         client.destroy();
         process.exit(1);
     }
 
-try {
-        // --- ATUALIZADO: Força uma busca profunda em todos os chats ativos e arquivados ---
-        const chats = await client.getChats();
-        let targetChat = null;
+    // Carrega o Chat ID guardado nos teus Secrets do GitHub
+    let groupId = process.env.WHATSAPP_GROUP_ID;
+    if (!groupId) {
+        console.error('Abort: WHATSAPP_GROUP_ID environment variable is missing.');
+        client.destroy();
+        process.exit(1);
+    }
+    
+    // Limpeza rigorosa contra aspas acidentais no segredo
+    groupId = groupId.trim().replace(/['"]/g, ''); 
 
-        // O Nome exato do subgrupo da igreja como aparece dentro da Comunidade
-        const nomeDoGrupoLido = "IASD Angra do Heroísmo"; 
-
-        let groupId = process.env.WHATSAPP_GROUP_ID;
-        if (groupId) {
-            groupId = groupId.trim().replace(/['"]/g, '');
-            if (groupId.includes('@g.us')) {
-                console.log(`Tentando localizar por ID na Comunidade: ${groupId}`);
-                targetChat = chats.find(chat => chat.id._serialized === groupId);
-            }
-        }
-
-        // SE NÃO ENCONTRAR PELO ID, FAZEMOS A BUSCA DE COMUNIDADE POR NOME:
-        if (!targetChat) {
-            console.log(`ID não resolveu. Varrendo subgrupos da Comunidade por nome: "${nomeDoGrupoLido}"...`);
-            
-            // Varre todos os chats e remove espaços ocultos que o WhatsApp injeta em Comunidades
-            targetChat = chats.find(chat => {
-                return (chat.isGroup || chat.id._serialized.includes('@g.us')) && 
-                       chat.name && 
-                       chat.name.stripCustom() === nomeDoGrupoLido.stripCustom();
-            });
-        }
-
-        // SE AINDA ASSIM NÃO ENCONTRAR (Comum em Comunidades novas no WhatsApp Web):
-        if (!targetChat) {
-            console.log('Tentando busca agressiva por histórico de Comunidade...');
-            for (const chat of chats) {
-                if (chat.name && chat.name.trim().toLowerCase() === nomeDoGrupoLido.trim().toLowerCase()) {
-                    targetChat = chat;
-                    break;
-                }
-            }
-        }
-
-        if (targetChat) {
-            console.log(`Subgrupo da Comunidade localizado: "${targetChat.name}" (ID: ${targetChat.id._serialized})`);
-            console.log('Iniciando transmissão do bloco de meditações...');
-            
-            await targetChat.sendMessage(message);
-            
-            console.log('Daily meditation cluster pushed successfully to WhatsApp Community group!');
-            client.destroy();
-            process.exit(0);
-        } else {
-            throw new Error('O subgrupo da Comunidade não foi localizado na lista de interações do WhatsApp Web.');
-        }
-
+    try {
+        console.log(`Attempting to transmit message to verified group ID: ${groupId}`);
+        
+        // Abre e valida o ID do chat diretamente na infraestrutura da Comunidade
+        const chat = await client.getChatById(groupId);
+        await chat.sendMessage(message);
+        
+        console.log('Daily meditation cluster pushed successfully to WhatsApp Community group!');
+        client.destroy();
+        process.exit(0); // Código de sucesso total
     } catch (err) {
         console.error('Failed to transmit message payload over WhatsApp Web interface:', err.message || err);
         client.destroy();
-        process.exit(1);
+        process.exit(1); // Força falha para ativar o alarme no Telegram pessoal
     }
 });
 
+// Trata rejeição de chaves criptográficas
 client.on('auth_failure', (msg) => {
     console.error('Authentication signature rejected:', msg);
     process.exit(1);
