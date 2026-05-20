@@ -66,7 +66,7 @@ client.on('ready', async () => {
             
             // INDICA O NOME DO TEU GRUPO: O script varre o teu WhatsApp à procura do nome correto
             // Se o teu grupo não se chamar exatamente "Meditações IASD", altera o texto abaixo entre aspas:
-            const nomeDoGrupoLido = "Meditações IASD"; 
+            const nomeDoGrupoLido = "IASD Angra do Heroísmo"; 
             
             targetChat = chats.find(chat => chat.isGroup && chat.name.trim() === nomeDoGrupoLido.trim());
         }
