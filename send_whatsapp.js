@@ -8,7 +8,15 @@ const client = new Client({
     }),
     puppeteer: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage', // Evita que o Linux fique sem memória temporária
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu' // Servidores do GitHub não têm placa gráfica
+        ]
     }
 });
 
@@ -19,9 +27,12 @@ client.on('qr', (qr) => {
     
     // --- CORRIGIDO AQUI (Adicionado o parâmetro inverse: true) ---
     require('qrcode-terminal').generate(qr, { small: true, inverse: true });
-    
-    client.destroy();
-    process.exit(1); 
+
+    // Damos uma pequena folga de 60 segundos para conseguires escanear antes de fechar o processo
+    setTimeout(() => {
+        client.destroy();
+        process.exit(1); 
+    }, 60000);
 });
 
 client.on('ready', async () => {
