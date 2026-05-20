@@ -57,7 +57,7 @@ try {
         let targetChat = null;
 
         // O Nome exato do subgrupo da igreja como aparece dentro da Comunidade
-        const nomeDoGrupoLido = "Meditações IASD"; 
+        const nomeDoGrupoLido = "IASD Angra do Heroísmo"; 
 
         let groupId = process.env.WHATSAPP_GROUP_ID;
         if (groupId) {
