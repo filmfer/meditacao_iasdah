@@ -58,7 +58,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-        run: python scrape_and_send.py  # <-- Altere aqui se o nome do seu script Python principal for diferente
+        run: python meditacao_iasdah.py  # <-- Altere aqui se o nome do seu script Python principal for diferente
 
       # --- NOVO: Passo que injeta a automação headless para enviar ao grupo do WhatsApp ---
       - name: Executar envio automatizado para o WhatsApp
@@ -66,7 +66,7 @@ jobs:
           WA_GROUP_ID: ${{ secrets.WA_GROUP_ID }}
         run: node send_whatsapp.js
 
-      # --- NOVO: Interceptador de Erros. Dispara se o passo anterior do WhatsApp falhar ---
+      # --- NOVO: Interceptador de Erros. Dispara-se o passo anterior do WhatsApp falhar ---
       - name: Interceptar e Tratar Alerta de Sessão Expirada
         if: failure()
         env:
