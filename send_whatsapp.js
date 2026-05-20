@@ -22,7 +22,7 @@ const client = new Client({
 client.on('qr', (qr) => {
     console.error('AVISO: Sessão expirou. Novo QR Code gerado.');
     require('qrcode-terminal').generate(qr, { small: true, inverse: true });
-    setTimeout(() => { client.destroy(); process.exit(1); }, 90000);
+    setTimeout(() => { client.destroy(); process.exit(1); }, 60000);
 });
 
 client.on('ready', async () => {
@@ -36,10 +36,8 @@ client.on('ready', async () => {
         process.exit(1);
     }
 
-    // Lê o arquivo gerado pelo Python
     const rawContent = fs.readFileSync('whatsapp_msg.txt', 'utf8');
     
-    // --- NOVO: Divide o texto em mensagens individuais através do separador ---
     const mensagens = rawContent.split('===DIVISAO_MEDITACAO===')
                                 .map(msg => msg.trim())
                                 .filter(msg => msg.length > 0);
@@ -59,30 +57,33 @@ client.on('ready', async () => {
     groupId = groupId.trim().replace(/['"]/g, ''); 
 
     try {
-        console.log(`Grupo de Comunidade alvo: ${groupId}`);
+        console.log(`Grupo alvo: ${groupId}`);
         const chat = await client.getChatById(groupId);
         
-        // --- MOTOR DE ENVIO INDIVIDUAL COM COMPASSO DE ESPERA ---
         for (let i = 0; i < mensagens.length; i++) {
             console.log(`\nA processar publicação ${i + 1} de ${mensagens.length}...`);
             
-            // Envia a mensagem individual
-            await chat.sendMessage(mensagens[i]);
-            console.log(`Mensagem ${i + 1} colada no chat.`);
+            // --- CORREÇÃO DO MARKDOWN: Limpa as barras de escape (\) que o WhatsApp não usa ---
+            // Remove as barras antes de pontos, traços, parêntesis e chavetas
+            let mensagemLimpa = mensagens[i].replace(/\\([.\-_()!\[\]])/g, '$1');
             
-            // Se não for a última mensagem, aguarda 10 segundos para carregar o Thumbnail
-            // antes de enviar a meditação seguinte.
+            // Correção extra para links URL que possam ter ficado com escapes ocultos
+            mensagemLimpa = mensagemLimpa.replace(/\\_/g, '_').replace(/\\=/g, '=');
+
+            // Envia a mensagem limpa
+            await chat.sendMessage(mensagemLimpa);
+            console.log(`Mensagem ${i + 1} colada no chat (Markdown limpo).`);
+            
             if (i < mensagens.length - 1) {
                 console.log('⏱️ Aguarda 10 segundos para carregar o thumbnail do link do YouTube...');
                 await new Promise(resolve => setTimeout(resolve, 10000));
             }
         }
         
-        // Sincronização final de rede para garantir o escoamento total das 3 mensagens
         console.log('\nA aguardar sincronização final de rede (8 segundos)...');
         await new Promise(resolve => setTimeout(resolve, 8000));
         
-        console.log('Todas as meditações foram publicadas individualmente com sucesso!');
+        console.log('Todas as meditações foram publicadas de forma limpa e individual!');
         client.destroy();
         process.exit(0); 
     } catch (err) {
