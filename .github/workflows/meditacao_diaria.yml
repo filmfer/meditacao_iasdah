@@ -56,7 +56,8 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: meditacao_diaria.yml
           name: whatsapp-session
-          path: ./.wwebjs_auth
+          # Caminho sem o ponto
+          path: whatsapp_auth
           if_no_artifact_found: warn
 
       - name: Instalar dependências (Python & Node.js)
@@ -86,10 +87,13 @@ jobs:
         run: python alert_failure.py
 
       - name: Guardar Estado Atualizado da Sessão do WhatsApp
-        if: always() # <--- Temporariamente ALWAYS para forçar a gravação inicial
+        if: always() 
         uses: actions/upload-artifact@v4
         with:
           name: whatsapp-session
-          path: ./.wwebjs_auth
+          # Caminho sem o ponto
+          path: whatsapp_auth
           retention-days: 2
           overwrite: true
+          # Forçar a gravação de qualquer ficheiro interno de sistema
+          include-hidden-files: true
