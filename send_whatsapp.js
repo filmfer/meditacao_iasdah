@@ -17,8 +17,8 @@ client.on('qr', (qr) => {
     console.error('CRITICAL ERROR: WhatsApp session has expired or was disconnected!');
     console.log('A new QR code session initialization is required.');
     
-    // Mostra o QR code terminal apenas caso queira debugar manualmente nos logs
-    require('qrcode-terminal').generate(qr, { small: true });
+    // --- CORRIGIDO AQUI (Adicionado o parâmetro inverse: true) ---
+    require('qrcode-terminal').generate(qr, { small: true, inverse: true });
     
     client.destroy();
     process.exit(1); 
