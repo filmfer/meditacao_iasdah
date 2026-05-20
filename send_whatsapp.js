@@ -1,87 +1,54 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const fs = require('fs');
-
-const client = new Client({
-    authStrategy: new LocalAuth({
-        dataPath: './.wwebjs_auth'
-    }),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox', 
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage', 
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-        ]
-    }
-});
-
-// Se por algum motivo a sessão cair no futuro, ele avisa e gera o QR
-client.on('qr', (qr) => {
-    console.error('CRITICAL ERROR: WhatsApp session has expired or was disconnected!');
-    require('qrcode-terminal').generate(qr, { small: true, inverse: true });
-    setTimeout(() => { client.destroy(); process.exit(1); }, 60000);
-});
-
-client.on('ready', async () => {
-    console.log('WhatsApp Client connection established successfully!');
-    console.log('Waiting 5 seconds for the interface to stabilize...');
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    
-    if (!fs.existsSync('whatsapp_msg.txt')) {
-        console.error('Abort: whatsapp_msg.txt not found.');
-        client.destroy();
-        process.exit(1);
-    }
-
-    let message = fs.readFileSync('whatsapp_msg.txt', 'utf8');
-    message = message.trim().replace(/\n\n={30}\n\n$/, '').trim();
-
-    if (!message) {
-        console.error('Abort: Message payload is empty.');
-        client.destroy();
-        process.exit(1);
-    }
-
-    try {
+try {
+        // --- ATUALIZADO: Força uma busca profunda em todos os chats ativos e arquivados ---
         const chats = await client.getChats();
         let targetChat = null;
 
-        // TENTATIVA 1: Procurar pelo ID guardado nos Secrets
+        // O Nome exato do subgrupo da igreja como aparece dentro da Comunidade
+        const nomeDoGrupoLido = "Meditações IASD"; 
+
         let groupId = process.env.WHATSAPP_GROUP_ID;
         if (groupId) {
             groupId = groupId.trim().replace(/['"]/g, '');
             if (groupId.includes('@g.us')) {
-                console.log(`Attempting to find group by ID: ${groupId}`);
+                console.log(`Tentando localizar por ID na Comunidade: ${groupId}`);
                 targetChat = chats.find(chat => chat.id._serialized === groupId);
             }
         }
 
-        // TENTATIVA 2: Se o ID não funcionar ou for o link, procuramos pelo NOME real do grupo!
+        // SE NÃO ENCONTRAR PELO ID, FAZEMOS A BUSCA DE COMUNIDADE POR NOME:
         if (!targetChat) {
-            console.log('Group ID not valid or not found. Searching all chats for the Church Group...');
+            console.log(`ID não resolveu. Varrendo subgrupos da Comunidade por nome: "${nomeDoGrupoLido}"...`);
             
-            // INDICA O NOME DO TEU GRUPO: O script varre o teu WhatsApp à procura do nome correto
-            // Se o teu grupo não se chamar exatamente "Meditações IASD", altera o texto abaixo entre aspas:
-            const nomeDoGrupoLido = "IASD Angra do Heroísmo"; 
-            
-            targetChat = chats.find(chat => chat.isGroup && chat.name.trim() === nomeDoGrupoLido.trim());
+            // Varre todos os chats e remove espaços ocultos que o WhatsApp injeta em Comunidades
+            targetChat = chats.find(chat => {
+                return (chat.isGroup || chat.id._serialized.includes('@g.us')) && 
+                       chat.name && 
+                       chat.name.stripCustom() === nomeDoGrupoLido.stripCustom();
+            });
+        }
+
+        // SE AINDA ASSIM NÃO ENCONTRAR (Comum em Comunidades novas no WhatsApp Web):
+        if (!targetChat) {
+            console.log('Tentando busca agressiva por histórico de Comunidade...');
+            for (const chat of chats) {
+                if (chat.name && chat.name.trim().toLowerCase() === nomeDoGrupoLido.trim().toLowerCase()) {
+                    targetChat = chat;
+                    break;
+                }
+            }
         }
 
         if (targetChat) {
-            console.log(`Group found: "${targetChat.name}" (ID: ${targetChat.id._serialized})`);
-            console.log('Transmitting daily meditation cluster...');
+            console.log(`Subgrupo da Comunidade localizado: "${targetChat.name}" (ID: ${targetChat.id._serialized})`);
+            console.log('Iniciando transmissão do bloco de meditações...');
             
             await targetChat.sendMessage(message);
             
-            console.log('Daily meditation cluster pushed successfully to WhatsApp!');
+            console.log('Daily meditation cluster pushed successfully to WhatsApp Community group!');
             client.destroy();
             process.exit(0);
         } else {
-            throw new Error('Church group chat could not be located in the active chat list.');
+            throw new Error('O subgrupo da Comunidade não foi localizado na lista de interações do WhatsApp Web.');
         }
 
     } catch (err) {
@@ -89,11 +56,3 @@ client.on('ready', async () => {
         client.destroy();
         process.exit(1);
     }
-});
-
-client.on('auth_failure', (msg) => {
-    console.error('Authentication signature rejected:', msg);
-    process.exit(1);
-});
-
-client.initialize();
