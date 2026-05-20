@@ -2,9 +2,9 @@ name: Publicar Meditação Diária no Telegram e WhatsApp
 
 on:
   schedule:
-    # Executa às 06:16 UTC todos os dias.
-    - cron: '16 6 * * *'
-  # Permite também executar manualmente a partir do separador Actions no GitHub
+    # IMPORTANTE: Forçamos o gatilho para as 07:00 UTC (07:00 local no Verão)
+    # No Inverno o GitHub acorda aqui também, mas o script abaixo vai adiar a execução em 1 hora.
+    - cron: '15 7 * * *'
   workflow_dispatch:
 
 jobs:
@@ -25,6 +25,25 @@ jobs:
           sudo apt-get install -y language-pack-pt
           sudo locale-gen pt_PT.UTF-8
           sudo update-locale LANG=pt_PT.UTF-8
+
+      # --- NOVO: MOTOR DE INTELIGÊNCIA HORÁRIA ---
+      # Este script verifica se a hora local atual calculada para a timezone "Atlantic/Azores"
+      # coincide com o Horário de Inverno. Se sim, aguarda 3600 segundos (1 hora).
+      - name: Ajustar Horário Local dos Açores (Verão/Inverno)
+        run: |
+          echo "A verificar mudança de hora local para Atlantic/Azores..."
+          # Obtém o desvio atual em relação a UTC (ex: +0000 ou -0100)
+          TZ="Atlantic/Azores" TZ_OFFSET=$(date +%z)
+          echo "Desvio atual detetado: $TZ_OFFSET"
+          
+          if [ "$TZ_OFFSET" = "-0100" ]; then
+            echo "Detectado: Horário de Inverno nos Açores!"
+            echo "A adiar a execução em 60 minutos para publicar exatamente às 07:00 locais."
+            sleep 3600
+          else
+            echo "Detectado: Horário de Verão nos Açores (ou UTC+0)."
+            echo "A avançar imediatamente."
+          fi
 
       - name: Configurar o Node.js Environment
         uses: actions/setup-node@v3
@@ -67,7 +86,7 @@ jobs:
         run: python alert_failure.py
 
       - name: Guardar Estado Atualizado da Sessão do WhatsApp
-        if: success() # Segurança ativa: só guarda se o envio correu a 100%
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: whatsapp-session
