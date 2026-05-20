@@ -2,13 +2,9 @@
 
 Um bot automatizado e resiliente para extrair meditações diárias do site CPB Mais e publicá-las de forma independente e agendada num canal do **Telegram** e num grupo/comunidade do **WhatsApp**. Nunca mais se esqueça de partilhar a mensagem do dia!
 
----
-
 ## 🎯 Sobre o Projeto
 
 Este projeto foi criado para automatizar a tarefa diária de copiar, formatar e colar as meditações matinais, da mulher e dos jovens. O bot elimina o trabalho manual: acede ao site oficial, extrai o conteúdo, trata as particularidades de formatação de cada plataforma e distribui as mensagens de forma limpa, garantindo uma experiência de leitura agradável e profissional para a comunidade da igreja.
-
----
 
 ## 🚀 Funcionalidades Principais
 
@@ -22,14 +18,10 @@ Este projeto foi criado para automatizar a tarefa diária de copiar, formatar e 
 * **Gestão Horária Automática (Fuso Horário dos Açores):** Graças a uma verificação lógica integrada, o sistema deteta mudanças de horário e executa sempre às **07:00 da manhã locais em Angra do Heroísmo**, quer estejamos no Horário de Verão (UTC+0) ou no Horário de Inverno (UTC-1).
 * **Persistência de Sessão sem Custos:** Utiliza emulação headless (WhatsApp Web) guardada de forma encriptada através de *Artifacts* do GitHub Actions, contornando as restrições e custos da API Business oficial da Meta.
 
----
-
 ## 🔧 Como Funciona
 
 1. **Raspagem e Telegram (Python):** O script `meditacao_iasdah.py` acede ao HTML com `requests` e `BeautifulSoup4`, extrai os dados, envia-os para a API do Telegram e salva o payload estruturado num ficheiro local com delimitadores de corte.
 2. **Envio Resiliente para o WhatsApp (Node.js):** O script `send_whatsapp.js` inicializa um navegador Chromium invisível através de `puppeteer`, carrega os tokens criptográficos de login guardados anteriormente, isola as mensagens, limpa caracteres inválidos e injeta-as diretamente no Chat ID nativo da Comunidade.
-
----
 
 ## ⚙️ Instalação e Configuração
 
