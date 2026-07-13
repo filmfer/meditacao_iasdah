@@ -16,7 +16,7 @@ EMAIL_RECEIVER = "filmfer@gmail.com"
 # Limpa o ficheiro do WhatsApp a cada nova execução diária
 open("whatsapp_msg.txt", "w", encoding="utf-8").close()
 
-# Suprime avisos de SSL explicitamente
+# Suprime avisos de SSL explícitamente
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
 
 def format_date_in_portuguese(date_obj):
