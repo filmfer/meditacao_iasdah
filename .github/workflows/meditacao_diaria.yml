@@ -64,7 +64,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 urllib3
-          npm install github:pedroslopez/whatsapp-web.js#main qrcode-terminal
+          npm install github:wwebjs/whatsapp-web.js qrcode-terminal
 
       - name: Executar o script de publicação (Scraping & Telegram)
         env:
@@ -87,6 +87,7 @@ jobs:
         run: python alert_failure.py
 
       - name: Limpar ficheiros socket antes do upload
+        if: always()
         run: rm -f whatsapp_auth/session/SingletonSocket
 
       - name: Guardar Estado Atualizado da Sessão do WhatsApp
