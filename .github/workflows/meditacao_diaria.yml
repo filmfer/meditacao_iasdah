@@ -86,6 +86,9 @@ jobs:
           TELEGRAM_PERSONAL_CHAT_ID: ${{ secrets.TELEGRAM_PERSONAL_CHAT_ID }}
         run: python alert_failure.py
 
+      - name: Limpar ficheiros socket antes do upload
+        run: rm -f whatsapp_auth/session/SingletonSocket
+
       - name: Guardar Estado Atualizado da Sessão do WhatsApp
         if: always() 
         uses: actions/upload-artifact@v4.4.0
