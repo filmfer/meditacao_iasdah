@@ -85,8 +85,28 @@ client.on('ready', async () => {
             }
         }
         
-        console.log('\nA aguardar sincronização final de rede (8 segundos)...');
-        await new Promise(resolve => setTimeout(resolve, 8000));
+        console.log('A aguardar 20 segundos para estabilização inicial e sincronização de chats...');
+        await new Promise(resolve => setTimeout(resolve, 20000)); // Increased from 5s to 20s
+
+        console.log(`Grupo alvo: ${process.env.WHATSAPP_GROUP_ID}`);
+
+        try {
+            const chat = await client.getChatById(process.env.WHATSAPP_GROUP_ID);
+    
+            // Safety check to ensure the chat was actually loaded
+            if (!chat) {
+                console.error('Erro Crítico: O grupo não foi encontrado. A sincronização de chats pode não ter terminado.');
+                process.exit(1);
+            }
+        
+            // Your existing code to send the message goes here
+            await chat.sendMessage(suaMensagem);
+            console.log('Mensagem enviada com sucesso!');
+        
+        } catch (error) {
+            console.error('Erro durante o envio individual:', error.message || error);
+            process.exit(1);
+        }
         
         console.log('Todas as meditações foram publicadas de forma limpa e individual!');
         client.destroy();
