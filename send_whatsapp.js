@@ -1,6 +1,8 @@
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const fs = require('fs');
 
+let qrTimeout;
+
 const client = new Client({
     authStrategy: new LocalAuth({
         dataPath: './whatsapp_auth' 
@@ -16,16 +18,19 @@ const client = new Client({
             '--no-zygote',
             '--disable-gpu'
         ]
+    },
+    // FIX: Forces a stable WhatsApp Web environment to eliminate the "r" error
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
     }
-}); // Note: webVersionCache has been removed so the patched library can do its job.
-
-let qrTimeout;
+});
 
 client.on('qr', (qr) => {
     console.error('AVISO: Sessão expirou. Novo QR Code gerado.');
     require('qrcode-terminal').generate(qr, { small: true, inverse: true });
     
-    // 2. Assign the timer to the variable and increase the wait time to 90 seconds just in case
+    // Safety timeout: gives you 90 seconds to scan the QR code before self-destructing
     qrTimeout = setTimeout(() => { 
         console.error('Abort: QR Code não foi lido a tempo.');
         client.destroy(); 
@@ -34,7 +39,7 @@ client.on('qr', (qr) => {
 });
 
 client.on('ready', async () => {
-    // 3. Cancel the self-destruct timer the moment the client connects
+    // Cancel the self-destruct timeout the moment authentication is successful
     if (qrTimeout) {
         clearTimeout(qrTimeout);
     }
@@ -74,7 +79,6 @@ client.on('ready', async () => {
         console.log(`Grupo alvo: ${groupId}`);
         const chat = await client.getChatById(groupId);
         
-        // --- VERIFICAÇÃO DE SEGURANÇA ---
         if (!chat) {
             console.error('Erro Crítico: O grupo não foi encontrado. A sincronização de chats pode não ter terminado.');
             client.destroy();
@@ -84,7 +88,7 @@ client.on('ready', async () => {
         for (let i = 0; i < mensagens.length; i++) {
             console.log(`\nA processar publicação ${i + 1} de ${mensagens.length}...`);
             
-            // --- CORREÇÃO DO MARKDOWN ---
+            // Clean markdown escapes
             let mensagemLimpa = mensagens[i].replace(/\\([.\-_()!\[\]])/g, '$1');
             mensagemLimpa = mensagemLimpa.replace(/\\_/g, '_').replace(/\\=/g, '=');
 
