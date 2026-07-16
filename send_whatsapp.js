@@ -19,16 +19,28 @@ const client = new Client({
     }
 }); // Note: webVersionCache has been removed so the patched library can do its job.
 
+let qrTimeout;
+
 client.on('qr', (qr) => {
     console.error('AVISO: Sessão expirou. Novo QR Code gerado.');
     require('qrcode-terminal').generate(qr, { small: true, inverse: true });
-    setTimeout(() => { client.destroy(); process.exit(1); }, 60000);
+    
+    // 2. Assign the timer to the variable and increase the wait time to 90 seconds just in case
+    qrTimeout = setTimeout(() => { 
+        console.error('Abort: QR Code não foi lido a tempo.');
+        client.destroy(); 
+        process.exit(1); 
+    }, 90000);
 });
 
 client.on('ready', async () => {
+    // 3. Cancel the self-destruct timer the moment the client connects
+    if (qrTimeout) {
+        clearTimeout(qrTimeout);
+    }
+
     console.log('WhatsApp Client connection established successfully!');
     
-    // --- TEMPO AUMENTADO PARA 20 SEGUNDOS ---
     console.log('A aguardar 20 segundos para estabilização inicial e sincronização de chats...');
     await new Promise(resolve => setTimeout(resolve, 20000));
     
