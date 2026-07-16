@@ -16,7 +16,7 @@ const client = new Client({
             '--no-zygote',
             '--disable-gpu'
         ]
-    }
+    },
     // Add this webVersionCache block:
     webVersionCache: {
         type: 'remote',
