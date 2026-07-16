@@ -16,13 +16,8 @@ const client = new Client({
             '--no-zygote',
             '--disable-gpu'
         ]
-    },
-    // Add this webVersionCache block:
-    webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html'
     }
-});
+}); // Note: webVersionCache has been removed so the patched library can do its job.
 
 client.on('qr', (qr) => {
     console.error('AVISO: Sessão expirou. Novo QR Code gerado.');
@@ -32,8 +27,10 @@ client.on('qr', (qr) => {
 
 client.on('ready', async () => {
     console.log('WhatsApp Client connection established successfully!');
-    console.log('A aguardar 5 segundos para estabilização inicial...');
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // --- TEMPO AUMENTADO PARA 20 SEGUNDOS ---
+    console.log('A aguardar 20 segundos para estabilização inicial e sincronização de chats...');
+    await new Promise(resolve => setTimeout(resolve, 20000));
     
     if (!fs.existsSync('whatsapp_msg.txt')) {
         console.error('Abort: whatsapp_msg.txt not found.');
@@ -65,17 +62,20 @@ client.on('ready', async () => {
         console.log(`Grupo alvo: ${groupId}`);
         const chat = await client.getChatById(groupId);
         
+        // --- VERIFICAÇÃO DE SEGURANÇA ---
+        if (!chat) {
+            console.error('Erro Crítico: O grupo não foi encontrado. A sincronização de chats pode não ter terminado.');
+            client.destroy();
+            process.exit(1);
+        }
+        
         for (let i = 0; i < mensagens.length; i++) {
             console.log(`\nA processar publicação ${i + 1} de ${mensagens.length}...`);
             
-            // --- CORREÇÃO DO MARKDOWN: Limpa as barras de escape (\) que o WhatsApp não usa ---
-            // Remove as barras antes de pontos, traços, parêntesis e chavetas
+            // --- CORREÇÃO DO MARKDOWN ---
             let mensagemLimpa = mensagens[i].replace(/\\([.\-_()!\[\]])/g, '$1');
-            
-            // Correção extra para links URL que possam ter ficado com escapes ocultos
             mensagemLimpa = mensagemLimpa.replace(/\\_/g, '_').replace(/\\=/g, '=');
 
-            // Envia a mensagem limpa
             await chat.sendMessage(mensagemLimpa);
             console.log(`Mensagem ${i + 1} colada no chat (Markdown limpo).`);
             
@@ -85,32 +85,10 @@ client.on('ready', async () => {
             }
         }
         
-        console.log('A aguardar 20 segundos para estabilização inicial e sincronização de chats...');
-        await new Promise(resolve => setTimeout(resolve, 20000)); // Increased from 5s to 20s
-
-        console.log(`Grupo alvo: ${process.env.WHATSAPP_GROUP_ID}`);
-
-        try {
-            const chat = await client.getChatById(process.env.WHATSAPP_GROUP_ID);
-    
-            // Safety check to ensure the chat was actually loaded
-            if (!chat) {
-                console.error('Erro Crítico: O grupo não foi encontrado. A sincronização de chats pode não ter terminado.');
-                process.exit(1);
-            }
-        
-            // Your existing code to send the message goes here
-            await chat.sendMessage(suaMensagem);
-            console.log('Mensagem enviada com sucesso!');
-        
-        } catch (error) {
-            console.error('Erro durante o envio individual:', error.message || error);
-            process.exit(1);
-        }
-        
         console.log('Todas as meditações foram publicadas de forma limpa e individual!');
         client.destroy();
         process.exit(0); 
+        
     } catch (err) {
         console.error('Erro durante o envio individual:', err.message || err);
         client.destroy();
