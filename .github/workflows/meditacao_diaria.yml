@@ -64,7 +64,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 urllib3
-          npm install github:wwebjs/whatsapp-web.js qrcode-terminal
+          npm install whatsapp-web.js@1.32.0 qrcode-terminal
 
       - name: Executar o script de publicação (Scraping & Telegram)
         env:
