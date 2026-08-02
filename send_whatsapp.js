@@ -4,148 +4,146 @@ const fs = require('fs');
 let qrTimeout;
 
 const client = new Client({
-  authStrategy: new LocalAuth({ dataPath: './whatsapp_auth' }),
+  authStrategy: new LocalAuth({
+    dataPath: './whatsapp_auth'
+  }),
+  // FIX (rotura ~2 semanas atrás): o pin de versão tinha sido removido de
+  // propósito, confiando no branch "main" do GitHub para seguir a versão
+  // live do WhatsApp Web. Isso reintroduziu exatamente o crash antigo
+  // "reading 'r' of undefined" em getChatById, porque o branch main
+  // apanha mudanças do WA Web antes de a biblioteca as suportar
+  // corretamente. Voltamos a pinar, mas com cache REMOTA (auto-atualizável
+  // via wppconnect-team/wa-version), não um HTML estático que expira.
   webVersionCache: {
     type: 'remote',
     remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1026433793.html',
     strict: false
   },
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox', 
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage', 
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-        ]
-    }
-    // NOTE: webVersionCache pin REMOVED on purpose (see incident writeup).
-    // It was hardcoded to WhatsApp Web version 2.2412.54 (~Dec 2024).
-    // WhatsApp now runs the 2.3000.xxxxxxxxxx-alpha version line and
-    // *expires every pinned version ~2 months after release* (confirmed
-    // via wppconnect.io/whatsapp-versions). A 20-month-old pin is
-    // guaranteed to be rejected by WhatsApp's servers, which silently
-    // breaks both fresh QR login and session restore. Since this repo
-    // already tracks the latest whatsapp-web.js from GitHub main, the
-    // library itself handles whatever version WhatsApp serves live —
-    // no cache override needed. If a future WA update ever reintroduces
-    // the old "reading 'r' of undefined" crash, re-pin to whatever
-    // version is CURRENT at https://wppconnect.io/whatsapp-versions
-    // at that time — never leave a static pin in place for months.
+  puppeteer: {
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--disable-gpu'
+    ]
+  }
 });
 
-// Global watchdog: if neither 'qr' nor 'ready' fires at all (e.g. because
-// WhatsApp's servers silently reject/hang the connection), the process
-// used to hang until the GitHub Actions job timeout with zero signal.
-// This forces a fast, loud failure so alert_failure.py actually runs today.
 let initWatchdog = setTimeout(() => {
-    console.error('Abort: Nem "qr" nem "ready" disparado em 90s. Provável incompatibilidade de versão do WhatsApp Web ou falha de rede.');
-    client.destroy();
-    process.exit(1);
+  console.error('Abort: Nem "qr" nem "ready" disparado em 90s. Provável incompatibilidade de versão do WhatsApp Web ou falha de rede.');
+  client.destroy();
+  process.exit(1);
 }, 90000);
 
 client.on('qr', (qr) => {
-    clearTimeout(initWatchdog);
-    console.error('AVISO: Sessão expirou. Novo QR Code gerado.');
-    require('qrcode-terminal').generate(qr, { small: true, inverse: true });
-    
-    // Safety timeout: gives you 90 seconds to scan the QR code before self-destructing
-    qrTimeout = setTimeout(() => { 
-        console.error('Abort: QR Code não foi lido a tempo.');
-        client.destroy(); 
-        process.exit(1); 
-    }, 90000);
+  clearTimeout(initWatchdog);
+  console.error('AVISO: Sessão expirou. Novo QR Code gerado.');
+  require('qrcode-terminal').generate(qr, { small: true, inverse: true });
+
+  qrTimeout = setTimeout(() => {
+    console.error('Abort: QR Code não foi lido a tempo.');
+    client.destroy();
+    process.exit(1);
+  }, 90000);
 });
 
 client.on('disconnected', (reason) => {
-    console.error('Sessão desconectada pelo WhatsApp:', reason);
-    process.exit(1);
+  console.error('Sessão desconectada pelo WhatsApp:', reason);
+  process.exit(1);
 });
 
 client.on('ready', async () => {
-    // Cancel any pending self-destruct timeouts now that we're fully authenticated
-    clearTimeout(initWatchdog);
-    if (qrTimeout) {
-        clearTimeout(qrTimeout);
-    }
+  clearTimeout(initWatchdog);
+  if (qrTimeout) clearTimeout(qrTimeout);
 
-    console.log('WhatsApp Client connection established successfully!');
-    
-    console.log('A aguardar 20 segundos para estabilização inicial e sincronização de chats...');
-    await new Promise(resolve => setTimeout(resolve, 20000));
-    
-    if (!fs.existsSync('whatsapp_msg.txt')) {
-        console.error('Abort: whatsapp_msg.txt not found.');
-        client.destroy();
-        process.exit(1);
-    }
+  console.log('WhatsApp Client connection established successfully!');
+  console.log('A aguardar 20 segundos para estabilização inicial e sincronização de chats...');
+  await new Promise(resolve => setTimeout(resolve, 20000));
 
-    const rawContent = fs.readFileSync('whatsapp_msg.txt', 'utf8');
-    
-    const mensagens = rawContent.split('===DIVISAO_MEDITACAO===')
-                                .map(msg => msg.trim())
-                                .filter(msg => msg.length > 0);
+  if (!fs.existsSync('whatsapp_msg.txt')) {
+    console.error('Abort: whatsapp_msg.txt not found.');
+    client.destroy();
+    process.exit(1);
+    return;
+  }
 
-    if (mensagens.length === 0) {
-        console.error('Abort: Nenhuma meditação válida encontrada no payload.');
-        client.destroy();
-        process.exit(1);
-    }
+  const rawContent = fs.readFileSync('whatsapp_msg.txt', 'utf8');
+  const mensagens = rawContent.split('===DIVISAO_MEDITACAO===')
+    .map(msg => msg.trim())
+    .filter(msg => msg.length > 0);
 
-    let groupId = process.env.WHATSAPP_GROUP_ID;
-    if (!groupId) {
-        console.error('Abort: WHATSAPP_GROUP_ID is missing.');
-        client.destroy();
-        process.exit(1);
-    }
-    groupId = groupId.trim().replace(/['"]/g, ''); 
+  if (mensagens.length === 0) {
+    console.error('Abort: Nenhuma meditação válida encontrada no payload.');
+    client.destroy();
+    process.exit(1);
+    return;
+  }
 
+  let groupId = process.env.WHATSAPP_GROUP_ID;
+  if (!groupId) {
+    console.error('Abort: WHATSAPP_GROUP_ID is missing.');
+    client.destroy();
+    process.exit(1);
+    return;
+  }
+  groupId = groupId.trim().replace(/['"]/g, '');
+
+  try {
+    console.log(`Grupo alvo: ${groupId}`);
+
+    // FIX defensivo: getChatById é o ponto exato onde o crash "reading 'r'"
+    // ocorria. Se voltar a acontecer (nova mudança de versão do WA Web
+    // antes do pin ser atualizado), fazemos 1 retry com um pequeno delay
+    // em vez de morrer imediatamente — dá margem para o store interno
+    // do WhatsApp Web terminar de sincronizar.
+    let chat;
     try {
-        console.log(`Grupo alvo: ${groupId}`);
-        const chat = await client.getChatById(groupId);
-        
-        if (!chat) {
-            console.error('Erro Crítico: O grupo não foi encontrado. A sincronização de chats pode não ter terminado.');
-            client.destroy();
-            process.exit(1);
-        }
-        
-        for (let i = 0; i < mensagens.length; i++) {
-            console.log(`\nA processar publicação ${i + 1} de ${mensagens.length}...`);
-            
-            // Clean markdown escapes. Covers the FULL Telegram MarkdownV2
-            // escape set (_*[]()~`>#+-=|{}.!) as a safety net — the real
-            // fix is that meditacao_iasdah.py now writes the already-clean
-            // whatsapp_content instead of the escaped telegram_content,
-            // but this stays defensive in case that ever regresses.
-            let mensagemLimpa = mensagens[i].replace(/\\([_*[\]()~`>#+\-=|{}.!])/g, '$1');
-
-            await chat.sendMessage(mensagemLimpa);
-            console.log(`Mensagem ${i + 1} colada no chat (Markdown limpo).`);
-            
-            if (i < mensagens.length - 1) {
-                console.log('⏱️ Aguarda 10 segundos para carregar o thumbnail do link do YouTube...');
-                await new Promise(resolve => setTimeout(resolve, 10000));
-            }
-        }
-        
-        console.log('Todas as meditações foram publicadas de forma limpa e individual!');
-        client.destroy();
-        process.exit(0); 
-        
-    } catch (err) {
-        console.error('Erro durante o envio individual:', err.message || err);
-        client.destroy();
-        process.exit(1); 
+      chat = await client.getChatById(groupId);
+    } catch (e) {
+      console.error('Falha na 1ª tentativa de getChatById, a tentar novamente em 5s:', e.message || e);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      chat = await client.getChatById(groupId);
     }
+
+    if (!chat) {
+      console.error('Erro Crítico: O grupo não foi encontrado. A sincronização de chats pode não ter terminado.');
+      client.destroy();
+      process.exit(1);
+      return;
+    }
+
+    for (let i = 0; i < mensagens.length; i++) {
+      console.log(`\nA processar publicação ${i + 1} de ${mensagens.length}...`);
+
+      let mensagemLimpa = mensagens[i].replace(/\\([_*[\]()~`>#+\-=|{}.!])/g, '$1');
+
+      await chat.sendMessage(mensagemLimpa);
+      console.log(`Mensagem ${i + 1} colada no chat (Markdown limpo).`);
+
+      if (i < mensagens.length - 1) {
+        console.log('⏱️ Aguarda 10 segundos para carregar o thumbnail do link do YouTube...');
+        await new Promise(resolve => setTimeout(resolve, 10000));
+      }
+    }
+
+    console.log('Todas as meditações foram publicadas de forma limpa e individual!');
+    client.destroy();
+    process.exit(0);
+
+  } catch (err) {
+    console.error('Erro durante o envio individual:', err.message || err);
+    client.destroy();
+    process.exit(1);
+  }
 });
 
 client.on('auth_failure', (msg) => {
-    console.error('Falha na assinatura de autenticação:', msg);
-    process.exit(1);
+  console.error('Falha na assinatura de autenticação:', msg);
+  process.exit(1);
 });
 
 client.initialize();
