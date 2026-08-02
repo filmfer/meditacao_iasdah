@@ -213,13 +213,12 @@ if __name__ == "__main__":
                 )
 
             # --- SALVAR PAYLOAD DO WHATSAPP ---
-            # Exemplo de como deves acumular as meditações (ajusta conforme as tuas variáveis de loop):
-            # Para cada meditação processada com sucesso:
-            # texto_formatado = f"*{titulo}*\n\n{corpo}\n\n{link_youtube}"
-            # conteudos_whatsapp.append(texto_formatado)
-            
-            # NOTA: Certifica-te de que o teu script Python une a lista usando o separador abaixo:
+            # BUGFIX: usar whatsapp_content (texto limpo, sem escapes MarkdownV2),
+            # não telegram_content. Estavas a escrever a versão escapada do
+            # Telegram (\*, \_, \., \-, \! etc.) no ficheiro que o send_whatsapp.js
+            # lê e envia praticamente verbatim — por isso apareciam barras
+            # invertidas literais nas mensagens do WhatsApp.
             with open("whatsapp_msg.txt", "a", encoding="utf-8") as f:
-                f.write(telegram_content + "\n\n===DIVISAO_MEDITACAO===\n\n")
+                f.write(whatsapp_content + "\n\n===DIVISAO_MEDITACAO===\n\n")
             
             print(f"Meditação '{title}' segmentada e preparada para o WhatsApp com sucesso.")
