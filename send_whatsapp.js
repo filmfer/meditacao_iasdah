@@ -7,13 +7,6 @@ const client = new Client({
   authStrategy: new LocalAuth({
     dataPath: './whatsapp_auth'
   }),
-  // FIX (rotura ~2 semanas atrás): o pin de versão tinha sido removido de
-  // propósito, confiando no branch "main" do GitHub para seguir a versão
-  // live do WhatsApp Web. Isso reintroduziu exatamente o crash antigo
-  // "reading 'r' of undefined" em getChatById, porque o branch main
-  // apanha mudanças do WA Web antes de a biblioteca as suportar
-  // corretamente. Voltamos a pinar, mas com cache REMOTA (auto-atualizável
-  // via wppconnect-team/wa-version), não um HTML estático que expira.
   webVersionCache: {
     type: 'remote',
     remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1026433793.html',
@@ -45,10 +38,11 @@ client.on('qr', (qr) => {
   require('qrcode-terminal').generate(qr, { small: true, inverse: true });
 
   qrTimeout = setTimeout(() => {
-  console.error('Abort: QR Code não foi lido a tempo.');
-  client.destroy();
-  process.exit(1);
-}, 180000); // 90s → 180s, para absorver o delay de streaming dos Actions
+    console.error('Abort: QR Code não foi lido a tempo.');
+    client.destroy();
+    process.exit(1);
+  }, 180000); // 90s -> 180s, para absorver o delay de streaming dos Actions
+});
 
 client.on('disconnected', (reason) => {
   console.error('Sessão desconectada pelo WhatsApp:', reason);
@@ -94,16 +88,11 @@ client.on('ready', async () => {
   try {
     console.log(`Grupo alvo: ${groupId}`);
 
-    // FIX defensivo: getChatById é o ponto exato onde o crash "reading 'r'"
-    // ocorria. Se voltar a acontecer (nova mudança de versão do WA Web
-    // antes do pin ser atualizado), fazemos 1 retry com um pequeno delay
-    // em vez de morrer imediatamente — dá margem para o store interno
-    // do WhatsApp Web terminar de sincronizar.
     let chat;
     try {
       chat = await client.getChatById(groupId);
     } catch (e) {
-      console.error('Falha na 1ª tentativa de getChatById, a tentar novamente em 5s:', e.message || e);
+      console.error('Falha na 1a tentativa de getChatById, a tentar novamente em 5s:', e.message || e);
       await new Promise(resolve => setTimeout(resolve, 5000));
       chat = await client.getChatById(groupId);
     }
@@ -124,7 +113,7 @@ client.on('ready', async () => {
       console.log(`Mensagem ${i + 1} colada no chat (Markdown limpo).`);
 
       if (i < mensagens.length - 1) {
-        console.log('⏱️ Aguarda 10 segundos para carregar o thumbnail do link do YouTube...');
+        console.log('Aguarda 10 segundos para carregar o thumbnail do link do YouTube...');
         await new Promise(resolve => setTimeout(resolve, 10000));
       }
     }
