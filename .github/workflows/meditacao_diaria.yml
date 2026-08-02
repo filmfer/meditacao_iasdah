@@ -7,6 +7,10 @@ on:
     - cron: '30 6 * * *'
   workflow_dispatch:
 
+permissions:
+  actions: read
+  contents: read
+
 jobs:
   build-and-send:
     runs-on: ubuntu-latest
