@@ -4,9 +4,12 @@ const fs = require('fs');
 let qrTimeout;
 
 const client = new Client({
-    authStrategy: new LocalAuth({
-        dataPath: './whatsapp_auth' 
-    }),
+  authStrategy: new LocalAuth({ dataPath: './whatsapp_auth' }),
+  webVersionCache: {
+    type: 'remote',
+    remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1026433793.html',
+    strict: false
+  },
     puppeteer: {
         headless: true,
         args: [
