@@ -45,11 +45,10 @@ client.on('qr', (qr) => {
   require('qrcode-terminal').generate(qr, { small: true, inverse: true });
 
   qrTimeout = setTimeout(() => {
-    console.error('Abort: QR Code não foi lido a tempo.');
-    client.destroy();
-    process.exit(1);
-  }, 90000);
-});
+  console.error('Abort: QR Code não foi lido a tempo.');
+  client.destroy();
+  process.exit(1);
+}, 180000); // 90s → 180s, para absorver o delay de streaming dos Actions
 
 client.on('disconnected', (reason) => {
   console.error('Sessão desconectada pelo WhatsApp:', reason);
