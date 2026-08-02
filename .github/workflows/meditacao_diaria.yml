@@ -88,7 +88,11 @@ jobs:
 
       - name: Limpar ficheiros socket antes do upload
         if: always()
-        run: rm -f whatsapp_auth/session/SingletonSocket
+        # Chrome's process-singleton mechanism uses THREE files together
+        # (SingletonLock, SingletonSocket, SingletonCookie). Only removing
+        # SingletonSocket leaves the Lock symlink behind, which can still
+        # make the next restored profile refuse to start cleanly.
+        run: rm -f whatsapp_auth/session/SingletonSocket whatsapp_auth/session/SingletonLock whatsapp_auth/session/SingletonCookie
 
       - name: Guardar Estado Atualizado da Sessão do WhatsApp
         uses: actions/upload-artifact@v4.4.0
