@@ -1,107 +1,148 @@
-name: Publicar Meditação Diária no Telegram e WhatsApp
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const fs = require('fs');
 
-on:
-  schedule:
-    # IMPORTANTE: Forçamos o gatilho para as 07:00 UTC (07:00 local no Verão)
-    # No Inverno o GitHub acorda aqui também, mas o script abaixo vai adiar a execução em 1 hora.
-    - cron: '30 6 * * *'
-  workflow_dispatch:
+let qrTimeout;
 
-jobs:
-  build-and-send:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out a cópia do repositório
-        uses: actions/checkout@v4
+const client = new Client({
+    authStrategy: new LocalAuth({
+        dataPath: './whatsapp_auth' 
+    }),
+    puppeteer: {
+        headless: true,
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage', 
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
+        ]
+    }
+    // NOTE: webVersionCache pin REMOVED on purpose (see incident writeup).
+    // It was hardcoded to WhatsApp Web version 2.2412.54 (~Dec 2024).
+    // WhatsApp now runs the 2.3000.xxxxxxxxxx-alpha version line and
+    // *expires every pinned version ~2 months after release* (confirmed
+    // via wppconnect.io/whatsapp-versions). A 20-month-old pin is
+    // guaranteed to be rejected by WhatsApp's servers, which silently
+    // breaks both fresh QR login and session restore. Since this repo
+    // already tracks the latest whatsapp-web.js from GitHub main, the
+    // library itself handles whatever version WhatsApp serves live —
+    // no cache override needed. If a future WA update ever reintroduces
+    // the old "reading 'r' of undefined" crash, re-pin to whatever
+    // version is CURRENT at https://wppconnect.io/whatsapp-versions
+    // at that time — never leave a static pin in place for months.
+});
 
-      - name: Configurar o Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+// Global watchdog: if neither 'qr' nor 'ready' fires at all (e.g. because
+// WhatsApp's servers silently reject/hang the connection), the process
+// used to hang until the GitHub Actions job timeout with zero signal.
+// This forces a fast, loud failure so alert_failure.py actually runs today.
+let initWatchdog = setTimeout(() => {
+    console.error('Abort: Nem "qr" nem "ready" disparado em 90s. Provável incompatibilidade de versão do WhatsApp Web ou falha de rede.');
+    client.destroy();
+    process.exit(1);
+}, 90000);
 
-      - name: Instalar o locale de Português Europeu (pt_PT)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y language-pack-pt
-          sudo locale-gen pt_PT.UTF-8
-          sudo update-locale LANG=pt_PT.UTF-8
+client.on('qr', (qr) => {
+    clearTimeout(initWatchdog);
+    console.error('AVISO: Sessão expirou. Novo QR Code gerado.');
+    require('qrcode-terminal').generate(qr, { small: true, inverse: true });
+    
+    // Safety timeout: gives you 90 seconds to scan the QR code before self-destructing
+    qrTimeout = setTimeout(() => { 
+        console.error('Abort: QR Code não foi lido a tempo.');
+        client.destroy(); 
+        process.exit(1); 
+    }, 90000);
+});
 
-      # --- NOVO: MOTOR DE INTELIGÊNCIA HORÁRIA ---
-      # Este script verifica se a hora local atual calculada para a timezone "Atlantic/Azores"
-      # coincide com o Horário de Inverno. Se sim, aguarda 3600 segundos (1 hora).
-      - name: Ajustar Horário Local dos Açores (Verão/Inverno)
-        run: |
-          echo "A verificar mudança de hora local para Atlantic/Azores..."
-          # Obtém o desvio atual em relação a UTC (ex: +0000 ou -0100)
-          TZ="Atlantic/Azores" TZ_OFFSET=$(date +%z)
-          echo "Desvio atual detetado: $TZ_OFFSET"
-          
-          if [ "$TZ_OFFSET" = "-0100" ]; then
-            echo "Detectado: Horário de Inverno nos Açores!"
-            echo "A adiar a execução em 60 minutos para publicar exatamente às 07:00 locais."
-            sleep 3600
-          else
-            echo "Detectado: Horário de Verão nos Açores (ou UTC+0)."
-            echo "A avançar imediatamente."
-          fi
+client.on('disconnected', (reason) => {
+    console.error('Sessão desconectada pelo WhatsApp:', reason);
+    process.exit(1);
+});
 
-      - name: Configurar o Node.js Environment
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
+client.on('ready', async () => {
+    // Cancel any pending self-destruct timeouts now that we're fully authenticated
+    clearTimeout(initWatchdog);
+    if (qrTimeout) {
+        clearTimeout(qrTimeout);
+    }
 
-      - name: Restaurar o Estado da Sessão do WhatsApp
-        uses: dawidd6/action-download-artifact@v6
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          workflow: meditacao_diaria.yml
-          name: whatsapp-session
-          # Caminho sem o ponto
-          path: whatsapp_auth
-          if_no_artifact_found: warn
+    console.log('WhatsApp Client connection established successfully!');
+    
+    console.log('A aguardar 20 segundos para estabilização inicial e sincronização de chats...');
+    await new Promise(resolve => setTimeout(resolve, 20000));
+    
+    if (!fs.existsSync('whatsapp_msg.txt')) {
+        console.error('Abort: whatsapp_msg.txt not found.');
+        client.destroy();
+        process.exit(1);
+    }
 
-      - name: Instalar dependências (Python & Node.js)
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 urllib3
-          npm install github:wwebjs/whatsapp-web.js qrcode-terminal
+    const rawContent = fs.readFileSync('whatsapp_msg.txt', 'utf8');
+    
+    const mensagens = rawContent.split('===DIVISAO_MEDITACAO===')
+                                .map(msg => msg.trim())
+                                .filter(msg => msg.length > 0);
 
-      - name: Executar o script de publicação (Scraping & Telegram)
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          EMAIL_ADDRESS: ${{ secrets.EMAIL_ADDRESS }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-        run: python meditacao_iasdah.py
+    if (mensagens.length === 0) {
+        console.error('Abort: Nenhuma meditação válida encontrada no payload.');
+        client.destroy();
+        process.exit(1);
+    }
 
-      - name: Executar envio automatizado para o WhatsApp
-        env:
-          WHATSAPP_GROUP_ID: ${{ secrets.WHATSAPP_GROUP_ID }}
-        run: node send_whatsapp.js
+    let groupId = process.env.WHATSAPP_GROUP_ID;
+    if (!groupId) {
+        console.error('Abort: WHATSAPP_GROUP_ID is missing.');
+        client.destroy();
+        process.exit(1);
+    }
+    groupId = groupId.trim().replace(/['"]/g, ''); 
 
-      - name: Interceptar e Tratar Alerta de Sessão Expirada
-        if: failure()
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_PERSONAL_CHAT_ID: ${{ secrets.TELEGRAM_PERSONAL_CHAT_ID }}
-        run: python alert_failure.py
+    try {
+        console.log(`Grupo alvo: ${groupId}`);
+        const chat = await client.getChatById(groupId);
+        
+        if (!chat) {
+            console.error('Erro Crítico: O grupo não foi encontrado. A sincronização de chats pode não ter terminado.');
+            client.destroy();
+            process.exit(1);
+        }
+        
+        for (let i = 0; i < mensagens.length; i++) {
+            console.log(`\nA processar publicação ${i + 1} de ${mensagens.length}...`);
+            
+            // Clean markdown escapes. Covers the FULL Telegram MarkdownV2
+            // escape set (_*[]()~`>#+-=|{}.!) as a safety net — the real
+            // fix is that meditacao_iasdah.py now writes the already-clean
+            // whatsapp_content instead of the escaped telegram_content,
+            // but this stays defensive in case that ever regresses.
+            let mensagemLimpa = mensagens[i].replace(/\\([_*[\]()~`>#+\-=|{}.!])/g, '$1');
 
-      - name: Limpar ficheiros socket antes do upload
-        if: always()
-        # Chrome's process-singleton mechanism uses THREE files together
-        # (SingletonLock, SingletonSocket, SingletonCookie). Only removing
-        # SingletonSocket leaves the Lock symlink behind, which can still
-        # make the next restored profile refuse to start cleanly.
-        run: rm -f whatsapp_auth/session/SingletonSocket whatsapp_auth/session/SingletonLock whatsapp_auth/session/SingletonCookie
+            await chat.sendMessage(mensagemLimpa);
+            console.log(`Mensagem ${i + 1} colada no chat (Markdown limpo).`);
+            
+            if (i < mensagens.length - 1) {
+                console.log('⏱️ Aguarda 10 segundos para carregar o thumbnail do link do YouTube...');
+                await new Promise(resolve => setTimeout(resolve, 10000));
+            }
+        }
+        
+        console.log('Todas as meditações foram publicadas de forma limpa e individual!');
+        client.destroy();
+        process.exit(0); 
+        
+    } catch (err) {
+        console.error('Erro durante o envio individual:', err.message || err);
+        client.destroy();
+        process.exit(1); 
+    }
+});
 
-      - name: Guardar Estado Atualizado da Sessão do WhatsApp
-        uses: actions/upload-artifact@v4.4.0
-        if: always()
-        with:
-          name: whatsapp-session
-          # Caminho sem o ponto
-          path: whatsapp_auth
-          retention-days: 90
-          overwrite: true
-          # Forçar a gravação de qualquer ficheiro interno de sistema
-          include-hidden-files: true
+client.on('auth_failure', (msg) => {
+    console.error('Falha na assinatura de autenticação:', msg);
+    process.exit(1);
+});
+
+client.initialize();
