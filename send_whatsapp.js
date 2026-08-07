@@ -114,9 +114,16 @@ client.on('ready', async () => {
         // client.sendMessage() takes a chat ID directly and uses a
         // lighter internal lookup that avoids that code path entirely.
 
+        // Send each meditation independently: one failing (thrown OR
+        // silently swallowed by WhatsApp) shouldn't block the others,
+        // and we want a clear per-message pass/fail report instead of
+        // a silent drop leaving zero trace in the log.
+        const resultados = [];
+
         for (let i = 0; i < mensagens.length; i++) {
-            console.log(`\nA processar publicação ${i + 1} de ${mensagens.length}...`);
-            
+            const numero = i + 1;
+            console.log(`\nA processar publicação ${numero} de ${mensagens.length}...`);
+
             // Clean markdown escapes. Covers the FULL Telegram MarkdownV2
             // escape set (_*[]()~`>#+-=|{}.!) as a safety net — the real
             // fix is that meditacao_iasdah.py now writes the already-clean
@@ -124,21 +131,49 @@ client.on('ready', async () => {
             // but this stays defensive in case that ever regresses.
             let mensagemLimpa = mensagens[i].replace(/\\([_*[\]()~`>#+\-=|{}.!])/g, '$1');
 
-            await client.sendMessage(groupId, mensagemLimpa);
-            console.log(`Mensagem ${i + 1} colada no chat (Markdown limpo).`);
-            
+            let enviado = false;
+            let ultimoErro = null;
+
+            for (let tentativa = 1; tentativa <= 2 && !enviado; tentativa++) {
+                try {
+                    await client.sendMessage(groupId, mensagemLimpa);
+                    enviado = true;
+                    console.log(`Mensagem ${numero} enviada (tentativa ${tentativa}) — chamada resolvida sem erro.`);
+                } catch (err) {
+                    ultimoErro = err.message || String(err);
+                    console.error(`Falha ao enviar mensagem ${numero} (tentativa ${tentativa}):`, ultimoErro);
+                    if (tentativa < 2) {
+                        console.log('A aguardar 15 segundos antes de tentar novamente...');
+                        await new Promise(resolve => setTimeout(resolve, 15000));
+                    }
+                }
+            }
+
+            resultados.push({ numero, enviado, erro: ultimoErro });
+
             if (i < mensagens.length - 1) {
-                console.log('⏱️ Aguarda 10 segundos para carregar o thumbnail do link do YouTube...');
-                await new Promise(resolve => setTimeout(resolve, 10000));
+                console.log('⏱️ Aguarda 20 segundos antes da próxima publicação...');
+                await new Promise(resolve => setTimeout(resolve, 20000));
             }
         }
-        
-        console.log('Todas as meditações foram publicadas de forma limpa e individual!');
+
+        console.log('\n--- Resumo do envio ---');
+        resultados.forEach(r => {
+            console.log(r.enviado
+                ? `✅ Mensagem ${r.numero}: enviada (sem erro reportado)`
+                : `❌ Mensagem ${r.numero}: FALHOU — ${r.erro}`);
+        });
+        console.log('NOTA: "enviada" só confirma que a chamada não lançou erro — se o');
+        console.log('WhatsApp descartar a mensagem silenciosamente (bug conhecido da');
+        console.log('biblioteca em grupos após a atualização de julho/2026), aqui vai');
+        console.log('aparecer como sucesso mesmo assim. Confirma sempre no grupo.');
+
+        const houveFalha = resultados.some(r => !r.enviado);
         client.destroy();
-        process.exit(0); 
-        
+        process.exit(houveFalha ? 1 : 0);
+
     } catch (err) {
-        console.error('Erro durante o envio individual:', err.message || err);
+        console.error('Erro fatal no processamento:', err.message || err);
         client.destroy();
         process.exit(1); 
     }
