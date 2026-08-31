@@ -2,22 +2,198 @@ name: Publicar Meditação Diária no Telegram e WhatsApp
 
 on:
   schedule:
-    # IMPORTANTE: Forçamos o gatilho para as 07:00 UTC (07:00 local no Verão)
-    # No Inverno o GitHub acorda aqui também, mas o script abaixo vai adiar a execução em 1 hora.
-    - cron: '30 6 * * *'
+    # GitHub Actions utiliza UTC.
+    #
+    # 06:00 UTC permite ao workflow calcular a hora real
+    # em Atlantic/Azores e aguardar até às 07:00 locais.
+    #
+    # Verão:
+    #   06:00 UTC = 06:00 Açores -> aguarda 1 hora
+    #
+    # Inverno:
+    #   06:00 UTC = 05:00 Açores -> aguarda 2 horas
+    #
+    # Se o GitHub atrasar o arranque, o cálculo é feito novamente
+    # com base na hora real, pelo que não dependemos de um sleep fixo.
+    - cron: '0 6 * * *'
+
   workflow_dispatch:
+
 
 jobs:
   build-and-send:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Check out a cópia do repositório
+
+      # ============================================================
+      # REPOSITÓRIO
+      # ============================================================
+
+      - name: Check out uma cópia do repositório
         uses: actions/checkout@v4
+
+
+      # ============================================================
+      # PYTHON
+      # ============================================================
 
       - name: Configurar o Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
+
+      # ============================================================
+      # DIAGNÓSTICO DE HORÁRIO
+      # ============================================================
+
+      - name: Diagnóstico de horário
+        shell: bash
+        run: |
+          echo "=================================================="
+          echo "DIAGNÓSTICO DE HORÁRIO"
+          echo "=================================================="
+
+          echo ""
+          echo "UTC:"
+          date -u '+%Y-%m-%d %H:%M:%S %Z (%z)'
+
+          echo ""
+          echo "Hora do runner:"
+          date '+%Y-%m-%d %H:%M:%S %Z (%z)'
+
+          echo ""
+          echo "Hora nos Açores:"
+          TZ=Atlantic/Azores date '+%Y-%m-%d %H:%M:%S %Z (%z)'
+
+          echo ""
+          echo "Hora em Lisboa:"
+          TZ=Europe/Lisbon date '+%Y-%m-%d %H:%M:%S %Z (%z)'
+
+          echo ""
+          echo "Timezone configurada no sistema:"
+          timedatectl || true
+
+          echo ""
+          echo "Tipo de execução:"
+          echo "${{ github.event_name }}"
+
+          echo ""
+          echo "=================================================="
+
+
+      # ============================================================
+      # CONTROLO DO HORÁRIO DE PUBLICAÇÃO
+      # ============================================================
+
+      - name: Aguardar até às 07:00 nos Açores
+        if: github.event_name == 'schedule'
+        shell: bash
+        run: |
+          set -e
+
+          echo "=================================================="
+          echo "CONTROLO DE HORÁRIO"
+          echo "=================================================="
+
+          # Obter a hora atual nos Açores.
+          HOUR=$(TZ=Atlantic/Azores date +%H)
+          MINUTE=$(TZ=Atlantic/Azores date +%M)
+          SECOND=$(TZ=Atlantic/Azores date +%S)
+
+          echo "Hora atual nos Açores: ${HOUR}:${MINUTE}:${SECOND}"
+
+          # Converter a hora atual para segundos desde a meia-noite.
+          CURRENT_SECONDS=$((10#$HOUR * 3600 + 10#$MINUTE * 60 + 10#$SECOND))
+
+          # 07:00:00 = 7 * 3600 segundos.
+          TARGET_SECONDS=$((7 * 3600))
+
+          echo "Hora alvo: 07:00:00"
+
+          # ----------------------------------------------------------
+          # CASO 1:
+          # Ainda não são 07:00.
+          # Calculamos exatamente quanto falta.
+          # ----------------------------------------------------------
+
+          if [ "$CURRENT_SECONDS" -lt "$TARGET_SECONDS" ]; then
+
+            WAIT_SECONDS=$((TARGET_SECONDS - CURRENT_SECONDS))
+
+            echo ""
+            echo "Ainda não são 07:00 nos Açores."
+            echo "Faltam ${WAIT_SECONDS} segundos."
+            echo "A aguardar até às 07:00..."
+
+            sleep "$WAIT_SECONDS"
+
+          fi
+
+          # ----------------------------------------------------------
+          # Mostrar a hora depois da espera.
+          # ----------------------------------------------------------
+
+          echo ""
+          echo "Hora após o controlo:"
+          TZ=Atlantic/Azores date '+%Y-%m-%d %H:%M:%S %Z (%z)'
+
+          echo ""
+          echo "=================================================="
+
+
+      # ============================================================
+      # VERIFICAÇÃO FINAL DO HORÁRIO
+      # ============================================================
+
+      - name: Confirmar janela de publicação
+        if: github.event_name == 'schedule'
+        shell: bash
+        run: |
+          set -e
+
+          HOUR=$(TZ=Atlantic/Azores date +%H)
+          MINUTE=$(TZ=Atlantic/Azores date +%M)
+          SECOND=$(TZ=Atlantic/Azores date +%S)
+
+          CURRENT_TIME="${HOUR}:${MINUTE}:${SECOND}"
+
+          echo "=================================================="
+          echo "VERIFICAÇÃO FINAL"
+          echo "=================================================="
+          echo "Hora nos Açores: ${CURRENT_TIME}"
+
+          # A publicação é permitida entre 07:00:00 e 07:59:59.
+          #
+          # Isto protege contra situações anormais, por exemplo:
+          # - GitHub iniciar a Action muitas horas depois;
+          # - execução duplicada;
+          # - alteração acidental do schedule;
+          # - problemas de infraestrutura.
+          #
+          # Uma execução às 18:00, por exemplo, será interrompida
+          # antes de enviar qualquer mensagem.
+
+          if [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 8 ]; then
+            echo "OK: execução dentro da janela prevista (07:00-07:59)."
+          else
+            echo ""
+            echo "ERRO: execução fora da janela permitida!"
+            echo "Hora atual nos Açores: ${CURRENT_TIME}"
+            echo ""
+            echo "A publicação será CANCELADA para evitar"
+            echo "o envio da meditação fora do horário previsto."
+            echo "=================================================="
+            exit 1
+          fi
+
+          echo "=================================================="
+
+
+      # ============================================================
+      # LOCALE PORTUGUÊS
+      # ============================================================
 
       - name: Instalar o locale de Português Europeu (pt_PT)
         run: |
@@ -26,29 +202,20 @@ jobs:
           sudo locale-gen pt_PT.UTF-8
           sudo update-locale LANG=pt_PT.UTF-8
 
-      # --- NOVO: MOTOR DE INTELIGÊNCIA HORÁRIA ---
-      # Este script verifica se a hora local atual calculada para a timezone "Atlantic/Azores"
-      # coincide com o Horário de Inverno. Se sim, aguarda 3600 segundos (1 hora).
-      - name: Ajustar Horário Local dos Açores (Verão/Inverno)
-        run: |
-          echo "A verificar mudança de hora local para Atlantic/Azores..."
-          # Obtém o desvio atual em relação a UTC (ex: +0000 ou -0100)
-          TZ="Atlantic/Azores" TZ_OFFSET=$(date +%z)
-          echo "Desvio atual detetado: $TZ_OFFSET"
-          
-          if [ "$TZ_OFFSET" = "-0100" ]; then
-            echo "Detectado: Horário de Inverno nos Açores!"
-            echo "A adiar a execução em 60 minutos para publicar exatamente às 07:00 locais."
-            sleep 3600
-          else
-            echo "Detectado: Horário de Verão nos Açores (ou UTC+0)."
-            echo "A avançar imediatamente."
-          fi
+
+      # ============================================================
+      # NODE.JS
+      # ============================================================
 
       - name: Configurar o Node.js Environment
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+
+      # ============================================================
+      # RESTAURAR SESSÃO WHATSAPP
+      # ============================================================
 
       - name: Restaurar o Estado da Sessão do WhatsApp
         uses: dawidd6/action-download-artifact@v6
@@ -56,15 +223,24 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: meditacao_diaria.yml
           name: whatsapp-session
-          # Caminho sem o ponto
           path: whatsapp_auth
           if_no_artifact_found: warn
+
+
+      # ============================================================
+      # DEPENDÊNCIAS
+      # ============================================================
 
       - name: Instalar dependências (Python & Node.js)
         run: |
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 urllib3
           npm install whatsapp-web.js@1.34.7 qrcode-terminal
+
+
+      # ============================================================
+      # PUBLICAÇÃO TELEGRAM
+      # ============================================================
 
       - name: Executar o script de publicação (Scraping & Telegram)
         env:
@@ -74,10 +250,20 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: python meditacao_iasdah.py
 
+
+      # ============================================================
+      # PUBLICAÇÃO WHATSAPP
+      # ============================================================
+
       - name: Executar envio automatizado para o WhatsApp
         env:
           WHATSAPP_GROUP_ID: ${{ secrets.WHATSAPP_GROUP_ID }}
         run: node send_whatsapp.js
+
+
+      # ============================================================
+      # ALERTA DE FALHA
+      # ============================================================
 
       - name: Interceptar e Tratar Alerta de Sessão Expirada
         if: failure()
@@ -86,22 +272,30 @@ jobs:
           TELEGRAM_PERSONAL_CHAT_ID: ${{ secrets.TELEGRAM_PERSONAL_CHAT_ID }}
         run: python alert_failure.py
 
+
+      # ============================================================
+      # LIMPEZA DA SESSÃO WHATSAPP
+      # ============================================================
+
       - name: Limpar ficheiros socket antes do upload
         if: always()
-        # Chrome's process-singleton mechanism uses THREE files together
-        # (SingletonLock, SingletonSocket, SingletonCookie). Only removing
-        # SingletonSocket leaves the Lock symlink behind, which can still
-        # make the next restored profile refuse to start cleanly.
-        run: rm -f whatsapp_auth/session/SingletonSocket whatsapp_auth/session/SingletonLock whatsapp_auth/session/SingletonCookie
+        run: |
+          rm -f \
+            whatsapp_auth/session/SingletonSocket \
+            whatsapp_auth/session/SingletonLock \
+            whatsapp_auth/session/SingletonCookie
+
+
+      # ============================================================
+      # GUARDAR SESSÃO WHATSAPP
+      # ============================================================
 
       - name: Guardar Estado Atualizado da Sessão do WhatsApp
         uses: actions/upload-artifact@v4.4.0
         if: always()
         with:
           name: whatsapp-session
-          # Caminho sem o ponto
           path: whatsapp_auth
           retention-days: 90
           overwrite: true
-          # Forçar a gravação de qualquer ficheiro interno de sistema
           include-hidden-files: true
