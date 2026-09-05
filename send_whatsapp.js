@@ -1,4 +1,4 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const fs = require('fs');
 
 let qrTimeout;
@@ -14,6 +14,52 @@ const MOTIVACOES = [
     '☀️🙏 As meditações de hoje já estão no grupo!\n\n📚 Um pouquinho da Palavra de manhã transforma o dia inteiro. Não te esqueças da leitura de hoje! 📖✨\n\nTenha um ótimo dia! 💛',
     '🌱💛 Três meditações, três oportunidades de crescer hoje!\n\n✝️ Completa o dia com a leitura diária — os pequenos momentos com Deus fazem toda a diferença. 📖🔥\n\nUm dia abençoado para todos! ☀️'
 ];
+
+// ------------------------------------------------------------
+// MINIATURA DO YOUTUBE
+// ------------------------------------------------------------
+// O WhatsApp só gera preview de links via a opção linkPreview da
+// biblioteca, que é notoriamente instável. Solução determinística:
+// descarregar a miniatura do vídeo (img.youtube.com) e enviá-la como
+// imagem com o link na caption. Nota: o WhatsApp não suporta imagens
+// clicáveis — o redirecionamento para o vídeo faz-se pela caption.
+
+const VIDEO_ID_RE = /watch\?v=([A-Za-z0-9_-]{5,20})/;
+
+function extrairVideoId(texto) {
+    const m = texto.match(VIDEO_ID_RE);
+    return m ? m[1] : null;
+}
+
+// Descarrega a miniatura do vídeo. Tenta maxresdefault (1280x720) e
+// faz fallback para hqdefault (480x360, existe sempre). Devolve um
+// objeto compatível com MessageMedia ou null se falhar.
+async function descarregarMiniatura(videoId) {
+    const qualidades = ['maxresdefault', 'hqdefault'];
+    for (const qualidade of qualidades) {
+        const url = `https://img.youtube.com/vi/${videoId}/${qualidade}.jpg`;
+        try {
+            // AbortSignal.timeout: nunca deixar o fetch suspenso o job.
+            const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
+            if (!res.ok) {
+                console.log(`Miniatura ${qualidade} indisponível (HTTP ${res.status}) para ${videoId}.`);
+                continue;
+            }
+            const buf = Buffer.from(await res.arrayBuffer());
+            // A maxresdefault pode existir fisicamente mas ser o placeholder
+            // cinzento de 120x90 (~1KB); nesse caso, passar à qualidade seguinte.
+            if (buf.length < 2000) {
+                console.log(`Miniatura ${qualidade} é placeholder vazio para ${videoId}.`);
+                continue;
+            }
+            console.log(`Miniatura ${qualidade} obtida (${buf.length} bytes) para ${videoId}.`);
+            return { mime: 'image/jpeg', data: buf.toString('base64'), filename: `thumb_${videoId}.jpg` };
+        } catch (err) {
+            console.error(`Falha ao descarregar miniatura ${qualidade} para ${videoId}:`, err.message || err);
+        }
+    }
+    return null;
+}
 
 const client = new Client({
     authStrategy: new LocalAuth({
@@ -146,6 +192,34 @@ client.on('ready', async () => {
             // whatsapp_content instead of the escaped telegram_content,
             // but this stays defensive in case that ever regresses.
             let mensagemLimpa = mensagens[i].replace(/\\([_*[\]()~`>#+\-=|{}.!])/g, '$1');
+
+            // --------------------------------------------------------
+            // MINIATURA DO YOUTUBE (antes do texto de cada meditação)
+            // --------------------------------------------------------
+            // Envia a imagem do vídeo com o link na caption (tocável) para
+            // reproduzir no WhatsApp o thumbnail que o Telegram mostra.
+            // Falhas aqui são não-fatais: é uma melhoria estética e nunca
+            // deve marcar a meditação como falhada nem parar o envio.
+            const videoId = extrairVideoId(mensagemLimpa);
+            if (videoId) {
+                try {
+                    const media = await descarregarMiniatura(videoId);
+                    if (media) {
+                        const thumb = new MessageMedia(media.mime, media.data, media.filename);
+                        const caption = `🎬 Ver o vídeo da meditação:\nhttps://www.youtube.com/watch?v=${videoId}`;
+                        try {
+                            await client.sendMessage(groupId, thumb, { caption });
+                            console.log(`🖼️ Miniatura da meditação ${numero} enviada (link na caption).`);
+                        } catch (err) {
+                            console.error(`Falha ao enviar a miniatura da meditação ${numero} (não-fatal):`, err.message || err);
+                        }
+                    } else {
+                        console.log(`Sem miniatura disponível para a meditação ${numero}; envio apenas o texto.`);
+                    }
+                } catch (err) {
+                    console.error(`Erro inesperado no processamento da miniatura ${numero} (não-fatal):`, err.message || err);
+                }
+            }
 
             let enviado = false;
             let ultimoErro = null;

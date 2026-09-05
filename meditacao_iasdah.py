@@ -66,7 +66,8 @@ def clean_scraped_text(text: str) -> str:
     return text
 
 def scrape_meditation(base_url, meditacao_matinal_title):
-    """Faz o scraping e retorna DUAS versões do texto formatado (Telegram e WhatsApp)."""
+    """Faz o scraping e retorna DUAS versões do texto formatado (Telegram e
+    WhatsApp) mais o URL de pré-visualização (thumbnail) para o Telegram."""
     try:
         response = requests.get(base_url, verify=False, timeout=15)
         response.raise_for_status()
@@ -118,21 +119,37 @@ def scrape_meditation(base_url, meditacao_matinal_title):
             f"{meditation_url}\n\n"
         )
 
-        return telegram_text.strip(), whatsapp_text.strip(), None
+        # URL para forçar a pré-visualização (thumbnail) no Telegram: o do
+        # vídeo do YouTube, se existir; caso contrário, o da própria meditação.
+        # Passado à API via link_preview_options, não depende de o URL estar
+        # reconhecível no texto (que vai escapado para MarkdownV2).
+        preview_url = youtube_link if youtube_link else meditation_url
+
+        return telegram_text.strip(), whatsapp_text.strip(), preview_url, None
 
     except requests.exceptions.RequestException as e:
-        return None, None, f"Erro de Request (Scraping): {e}"
+        return None, None, None, f"Erro de Request (Scraping): {e}"
     except Exception as e:
-        return None, None, f"Erro inesperado (Scraping): {e}"
+        return None, None, None, f"Erro inesperado (Scraping): {e}"
 
-def send_telegram_message(text, bot_token, chat_id):
-    """Envia uma mensagem para o canal/grupo do Telegram."""
+def send_telegram_message(text, bot_token, chat_id, preview_url=None):
+    """Envia uma mensagem para o canal/grupo do Telegram.
+
+    Se preview_url for fornecido, força a pré-visualização (thumbnail) desse
+    URL no topo da mensagem via link_preview_options (Bot API 7.0+) — garante
+    a miniatura mesmo que o URL no texto vá escapado para MarkdownV2.
+    """
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
     payload = {
         'chat_id': chat_id,
         'text': text,
         'parse_mode': 'MarkdownV2'
     }
+    if preview_url:
+        payload['link_preview_options'] = {
+            'url': preview_url,
+            'show_above_text': True
+        }
     try:
         response = requests.post(url, json=payload, timeout=15)
         response.raise_for_status()
@@ -170,14 +187,16 @@ if __name__ == "__main__":
             
             telegram_content = None
             whatsapp_content = None
+            telegram_preview_url = None
             last_scrape_error = ""
               
             for attempt in range(1, MAX_RETRIES + 1):
                 print(f"Tentativa de scraping nº {attempt}/{MAX_RETRIES} para '{title}'...")
-                t_content, w_content, error = scrape_meditation(url, title)
+                t_content, w_content, t_preview, error = scrape_meditation(url, title)
                 if t_content and w_content:
                     telegram_content = t_content
                     whatsapp_content = w_content
+                    telegram_preview_url = t_preview
                     print("Scraping bem-sucedido.")
                     break
                 last_scrape_error = error
@@ -197,7 +216,7 @@ if __name__ == "__main__":
             last_send_error = ""
             for attempt in range(1, MAX_RETRIES + 1):
                 print(f"Tentativa de envio para o Telegram nº {attempt}/{MAX_RETRIES} para '{title}'...")
-                success, error = send_telegram_message(telegram_content, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID)
+                success, error = send_telegram_message(telegram_content, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, telegram_preview_url)
                 if success:
                     send_success = True
                     break
