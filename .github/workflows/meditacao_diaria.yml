@@ -2,21 +2,26 @@ name: Publicar Meditação Diária no Telegram e WhatsApp
 
 on:
   schedule:
-    # GitHub Actions utiliza UTC.
+    # GitHub Actions utiliza UTC. A hora de PUBLICAÇÃO não depende da hora
+    # a que o GitHub arranca o run: o workflow calcula a hora real nos
+    # Açores e espera até às 07:00 locais antes de publicar (janela fixa
+    # 07:00-07:59, todos os dias do ano).
     #
-    # 06:00 UTC permite ao workflow calcular a hora real
-    # em Atlantic/Azores e aguardar até às 07:00 locais.
+    # Como o scheduler do GitHub não tem SLA (atrasos de 15-60 min são
+    # comuns), há TRÊS disparos redundantes; a deduplicação diária garante
+    # que só o primeiro publica:
     #
-    # Verão (WEST, UTC+1):
-    #   06:00 UTC = 07:00 Açores -> sem espera
-    #
-    # Inverno (WET, UTC+0):
-    #   06:00 UTC = 06:00 Açores -> aguarda 1 hora
-    #
-    # Se o GitHub atrasar o arranque (comum ultimamente), o cálculo é feito
-    # com base na hora real, não há sleep fixo, e a janela de publicação vai
-    # até às 12:00 locais — um atraso não deixa o dia sem meditação.
-    - cron: '0 6 * * *'
+    #  1) 05:00 UTC — margem principal contra atrasos do scheduler:
+    #     Verão (WEST, UTC+1):  06:00 Açores -> espera 1h
+    #     Inverno (WET, UTC+0): 05:00 Açores -> espera 2h
+    #  2) 06:30 UTC — redundância (atrasos longos ou run anterior falhado):
+    #     Verão:  07:30 Açores (publica de imediato, dentro da janela)
+    #     Inverno: 06:30 Açores -> espera 30 min
+    #  3) 08:15 UTC — sentinela: se nada foi publicado até esta hora,
+    #     falha a verificação de janela e envia alerta Telegram imediato.
+    - cron: '0 5 * * *'
+    - cron: '30 6 * * *'
+    - cron: '15 8 * * *'
 
   workflow_dispatch:
     inputs:
@@ -32,6 +37,14 @@ on:
 permissions:
   contents: read
   actions: read
+
+# Serializa as execuções do mesmo workflow: com três disparos diários, um
+# run só começa quando o anterior terminar. Assim, o run seguinte é sempre
+# travado pela deduplicação (se o anterior teve sucesso) ou serve de retry
+# (se falhou) — nunca há duas publicações em paralelo.
+concurrency:
+  group: meditacao-diaria
+  cancel-in-progress: false
 
 
 jobs:
@@ -162,111 +175,103 @@ jobs:
 
 
       # ============================================================
-      # CONTROLO DO HORÁRIO DE PUBLICAÇÃO
+      # CONTROLO DA JANELA DE PUBLICAÇÃO (07:00-07:59, Açores)
       # ============================================================
+      # A hora de publicação é controlada pelo relógio DESTE step, não pela
+      # hora a que o GitHub arranca o run:
+      # - antes das 07:00  -> espera exatamente até às 07:00;
+      # - 07:00-07:59      -> publica de imediato;
+      # - depois das 08:00 -> fora da janela: alerta Telegram imediato e
+      #   falha do run, para o dia nunca passar em silêncio.
+      # O input `force` contorna esta verificação (bypass manual).
 
-      - name: Aguardar até às 07:00 nos Açores
-        if: github.event_name == 'schedule' && steps.dedup.outputs.skip != 'true'
+      - name: Controlar janela de publicação (07:00-08:00)
+        if: steps.dedup.outputs.skip != 'true' && inputs.force != true
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_PERSONAL_CHAT_ID: ${{ secrets.TELEGRAM_PERSONAL_CHAT_ID }}
         shell: bash
         run: |
           set -e
 
           echo "=================================================="
-          echo "CONTROLO DE HORÁRIO"
+          echo "CONTROLO DA JANELA DE PUBLICAÇÃO (07:00-07:59)"
           echo "=================================================="
 
-          # Obter a hora atual nos Açores.
-          HOUR=$(TZ=Atlantic/Azores date +%H)
-          MINUTE=$(TZ=Atlantic/Azores date +%M)
-          SECOND=$(TZ=Atlantic/Azores date +%S)
+          get_azores_seconds() {
+            local H M S
+            H=$(TZ=Atlantic/Azores date +%H)
+            M=$(TZ=Atlantic/Azores date +%M)
+            S=$(TZ=Atlantic/Azores date +%S)
+            echo $((10#$H * 3600 + 10#$M * 60 + 10#$S))
+          }
 
-          echo "Hora atual nos Açores: ${HOUR}:${MINUTE}:${SECOND}"
-
-          # Converter a hora atual para segundos desde a meia-noite.
-          CURRENT_SECONDS=$((10#$HOUR * 3600 + 10#$MINUTE * 60 + 10#$SECOND))
-
-          # 07:00:00 = 7 * 3600 segundos.
+          CURRENT_SECONDS=$(get_azores_seconds)
           TARGET_SECONDS=$((7 * 3600))
 
-          echo "Hora alvo: 07:00:00"
-
           # ----------------------------------------------------------
-          # CASO 1:
-          # Ainda não são 07:00.
-          # Calculamos exatamente quanto falta.
+          # Antes das 07:00: espera até à hora exata de publicação.
+          # Teto de 3h (10800s): arranques mais cedo do que isso são
+          # anómalos e são cancelados — a sentinela das 08:15 UTC
+          # tratará do alerta do dia.
           # ----------------------------------------------------------
-
           if [ "$CURRENT_SECONDS" -lt "$TARGET_SECONDS" ]; then
-
             WAIT_SECONDS=$((TARGET_SECONDS - CURRENT_SECONDS))
 
+            if [ "$WAIT_SECONDS" -gt 10800 ]; then
+              echo "ERRO: arranque demasiado cedo (faltam ${WAIT_SECONDS}s para as 07:00)."
+              exit 1
+            fi
+
             echo ""
-            echo "Ainda não são 07:00 nos Açores."
-            echo "Faltam ${WAIT_SECONDS} segundos."
+            echo "Ainda não são 07:00 nos Açores. Faltam ${WAIT_SECONDS}s."
             echo "A aguardar até às 07:00..."
-
             sleep "$WAIT_SECONDS"
-
           fi
-
-          # ----------------------------------------------------------
-          # Mostrar a hora depois da espera.
-          # ----------------------------------------------------------
-
-          echo ""
-          echo "Hora após o controlo:"
-          TZ=Atlantic/Azores date '+%Y-%m-%d %H:%M:%S %Z (%z)'
-
-          echo ""
-          echo "=================================================="
-
-
-      # ============================================================
-      # VERIFICAÇÃO FINAL DO HORÁRIO
-      # ============================================================
-
-      - name: Confirmar janela de publicação
-        if: github.event_name == 'schedule' && steps.dedup.outputs.skip != 'true'
-        shell: bash
-        run: |
-          set -e
 
           HOUR=$(TZ=Atlantic/Azores date +%H)
           MINUTE=$(TZ=Atlantic/Azores date +%M)
           SECOND=$(TZ=Atlantic/Azores date +%S)
-
           CURRENT_TIME="${HOUR}:${MINUTE}:${SECOND}"
 
-          echo "=================================================="
-          echo "VERIFICAÇÃO FINAL"
-          echo "=================================================="
-          echo "Hora nos Açores: ${CURRENT_TIME}"
+          echo ""
+          echo "Hora após o controlo (Açores): ${CURRENT_TIME}"
 
-          # A publicação é permitida entre 07:00:00 e 11:59:59.
-          #
-          # O limite superior é tolerante de propósito: nos últimos tempos o
-          # GitHub tem iniciado os runs agendados com atraso, e cancelar às
-          # 08:00 deixava o dia sem meditação. A deduplicação diária (step
-          # "Verificar se já foi publicado hoje") garante que só há uma
-          # publicação por dia, mesmo com a janela alargada.
-          #
-          # Continuam bloqueadas, por exemplo, execuções à tarde/noite fora
-          # de horas ou repetições indevidas.
-
-          if [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 12 ]; then
-            echo "OK: execução dentro da janela prevista (07:00-11:59)."
-          else
-            echo ""
-            echo "ERRO: execução fora da janela permitida!"
-            echo "Hora atual nos Açores: ${CURRENT_TIME}"
-            echo ""
-            echo "A publicação será CANCELADA para evitar"
-            echo "o envio da meditação fora do horário previsto."
+          if [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 8 ]; then
+            echo "OK: execução dentro da janela prevista (07:00-07:59)."
             echo "=================================================="
-            exit 1
+            exit 0
           fi
 
+          # ----------------------------------------------------------
+          # Fora da janela (ex.: GitHub atrasou o run para depois das
+          # 08:00): alerta Telegram imediato + falha do job. Texto em
+          # claro, sem parse_mode, para não depender de escaping.
+          # ----------------------------------------------------------
+          echo ""
+          echo "ERRO: execução fora da janela permitida (07:00-07:59)."
+          echo "A enviar alerta Telegram e a cancelar a publicação."
+
+          ALERT_TEXT="⚠️ MEDITAÇÃO NÃO PUBLICADA — AÇÃO NECESSÁRIA ⚠️
+          
+          O run de hoje iniciou às ${CURRENT_TIME} (hora dos Açores), fora da janela obrigatória 07:00-08:00. A publicação foi cancelada.
+          
+          Executa o workflow manualmente (opção FORCE) ou verifica os logs no GitHub Actions para perceber porque é que o agendamento atrasou."
+
+          jq -n --arg chat_id "${TELEGRAM_PERSONAL_CHAT_ID}" \
+                --arg text "${ALERT_TEXT}" \
+                '{chat_id: $chat_id, text: $text}' > tg_alert.json
+
+          HTTP_CODE=$(curl -s -o tg_alert_resp.json -w '%{http_code}' \
+            -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -H "Content-Type: application/json" \
+            --data @tg_alert.json || true)
+          [ -z "${HTTP_CODE}" ] && HTTP_CODE=000
+          echo "Alerta Telegram: HTTP ${HTTP_CODE}"
+
+          rm -f tg_alert.json tg_alert_resp.json
           echo "=================================================="
+          exit 1
 
 
       # ============================================================
