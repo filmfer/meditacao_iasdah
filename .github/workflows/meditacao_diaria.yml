@@ -7,17 +7,31 @@ on:
     # 06:00 UTC permite ao workflow calcular a hora real
     # em Atlantic/Azores e aguardar até às 07:00 locais.
     #
-    # Verão:
+    # Verão (WEST, UTC+1):
+    #   06:00 UTC = 07:00 Açores -> sem espera
+    #
+    # Inverno (WET, UTC+0):
     #   06:00 UTC = 06:00 Açores -> aguarda 1 hora
     #
-    # Inverno:
-    #   06:00 UTC = 05:00 Açores -> aguarda 2 horas
-    #
-    # Se o GitHub atrasar o arranque, o cálculo é feito novamente
-    # com base na hora real, pelo que não dependemos de um sleep fixo.
+    # Se o GitHub atrasar o arranque (comum ultimamente), o cálculo é feito
+    # com base na hora real, não há sleep fixo, e a janela de publicação vai
+    # até às 12:00 locais — um atraso não deixa o dia sem meditação.
     - cron: '0 6 * * *'
 
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Ignorar a verificação de duplicação diária e publicar na mesma'
+        type: boolean
+        required: false
+        default: false
+
+
+# GITHUB_TOKEN com o mínimo necessário: ler metadados (deduplicação via API
+# de workflow runs) e descarregar o artefacto da sessão WhatsApp.
+permissions:
+  contents: read
+  actions: read
 
 
 jobs:
@@ -32,6 +46,70 @@ jobs:
 
       - name: Check out uma cópia do repositório
         uses: actions/checkout@v4
+
+
+      # ============================================================
+      # DEDUPLICAÇÃO DIÁRIA
+      # ============================================================
+      # Proteção contra publicações duplicadas no mesmo dia:
+      # - runs agendados duplicados ou atrasados;
+      # - execuções manuais quando o agendamento já correu com sucesso.
+      # Consulta a API de workflow runs e salta a execução se já existir
+      # um run de hoje concluído com sucesso (ou ainda em curso, para
+      # cobrir a corrida entre um run agendado e um manual simultâneos).
+      # Em caso de erro na API, falha aberta: publica na mesma — é pior
+      # ficar um dia sem meditação do que arriscar um duplicado.
+
+      - name: Verificar se já foi publicado hoje
+        if: inputs.force != true
+        id: dedup
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -e
+
+          TODAY=$(TZ=Atlantic/Azores date +%F)
+          echo "Data de referência (Atlantic/Azores): ${TODAY}"
+
+          HTTP_CODE=$(curl -s -o runs.json -w '%{http_code}' -G \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            --data-urlencode "created=>=${TODAY}" \
+            --data-urlencode "per_page=100" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/meditacao_diaria.yml/runs")
+
+          if [ "${HTTP_CODE}" != "200" ]; then
+            echo "::warning::Deduplicação indisponível (HTTP ${HTTP_CODE}). A prosseguir com a publicação."
+            rm -f runs.json
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Conta os runs de hoje já concluídos com sucesso OU ainda por
+          # concluir (fila/em curso), excluindo o run atual.
+          ATIVOS=$(jq --argjson run_atual "${GITHUB_RUN_ID}" '[
+            .workflow_runs[]
+            | select(.id != $run_atual)
+            | select(
+                (.conclusion == "success")
+                or (.status == "queued")
+                or (.status == "in_progress")
+                or (.status == "waiting")
+              )
+          ] | length' runs.json)
+
+          rm -f runs.json
+          echo "Runs de hoje concluídos com sucesso ou em curso: ${ATIVOS}"
+
+          if [ "${ATIVOS}" -gt 0 ]; then
+            echo "Já existe uma execução bem-sucedida (ou em curso) hoje. A saltar para evitar publicação duplicada."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Nenhuma publicação hoje. A prosseguir."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
 
       # ============================================================
@@ -88,7 +166,7 @@ jobs:
       # ============================================================
 
       - name: Aguardar até às 07:00 nos Açores
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' && steps.dedup.outputs.skip != 'true'
         shell: bash
         run: |
           set -e
@@ -148,7 +226,7 @@ jobs:
       # ============================================================
 
       - name: Confirmar janela de publicação
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' && steps.dedup.outputs.skip != 'true'
         shell: bash
         run: |
           set -e
@@ -164,19 +242,19 @@ jobs:
           echo "=================================================="
           echo "Hora nos Açores: ${CURRENT_TIME}"
 
-          # A publicação é permitida entre 07:00:00 e 07:59:59.
+          # A publicação é permitida entre 07:00:00 e 11:59:59.
           #
-          # Isto protege contra situações anormais, por exemplo:
-          # - GitHub iniciar a Action muitas horas depois;
-          # - execução duplicada;
-          # - alteração acidental do schedule;
-          # - problemas de infraestrutura.
+          # O limite superior é tolerante de propósito: nos últimos tempos o
+          # GitHub tem iniciado os runs agendados com atraso, e cancelar às
+          # 08:00 deixava o dia sem meditação. A deduplicação diária (step
+          # "Verificar se já foi publicado hoje") garante que só há uma
+          # publicação por dia, mesmo com a janela alargada.
           #
-          # Uma execução às 18:00, por exemplo, será interrompida
-          # antes de enviar qualquer mensagem.
+          # Continuam bloqueadas, por exemplo, execuções à tarde/noite fora
+          # de horas ou repetições indevidas.
 
-          if [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 8 ]; then
-            echo "OK: execução dentro da janela prevista (07:00-07:59)."
+          if [ "$HOUR" -ge 7 ] && [ "$HOUR" -lt 12 ]; then
+            echo "OK: execução dentro da janela prevista (07:00-11:59)."
           else
             echo ""
             echo "ERRO: execução fora da janela permitida!"
@@ -196,6 +274,7 @@ jobs:
       # ============================================================
 
       - name: Instalar o locale de Português Europeu (pt_PT)
+        if: steps.dedup.outputs.skip != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y language-pack-pt
@@ -208,6 +287,7 @@ jobs:
       # ============================================================
 
       - name: Configurar o Node.js Environment
+        if: steps.dedup.outputs.skip != 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -218,6 +298,7 @@ jobs:
       # ============================================================
 
       - name: Restaurar o Estado da Sessão do WhatsApp
+        if: steps.dedup.outputs.skip != 'true'
         uses: dawidd6/action-download-artifact@v6
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -232,6 +313,7 @@ jobs:
       # ============================================================
 
       - name: Instalar dependências (Python & Node.js)
+        if: steps.dedup.outputs.skip != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 urllib3
@@ -243,6 +325,7 @@ jobs:
       # ============================================================
 
       - name: Executar o script de publicação (Scraping & Telegram)
+        if: steps.dedup.outputs.skip != 'true'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -256,6 +339,7 @@ jobs:
       # ============================================================
 
       - name: Executar envio automatizado para o WhatsApp
+        if: steps.dedup.outputs.skip != 'true'
         env:
           WHATSAPP_GROUP_ID: ${{ secrets.WHATSAPP_GROUP_ID }}
         run: node send_whatsapp.js
@@ -292,7 +376,7 @@ jobs:
 
       - name: Guardar Estado Atualizado da Sessão do WhatsApp
         uses: actions/upload-artifact@v4.4.0
-        if: always()
+        if: always() && steps.dedup.outputs.skip != 'true'
         with:
           name: whatsapp-session
           path: whatsapp_auth

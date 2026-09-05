@@ -3,6 +3,18 @@ const fs = require('fs');
 
 let qrTimeout;
 
+// Flag de encerramento controlado: quando true, o handler 'disconnected'
+// não deve interpretar o fecho intencional (client.destroy()) como falha.
+let finalizando = false;
+
+// Mensagens finais de motivação para a leitura diária (uma é escolhida
+// aleatoriamente em cada execução). Enviada após a última meditação.
+const MOTIVACOES = [
+    '🌅✨ E com isto terminamos as meditações de hoje!\n\n📖 Reserve um momento tranquilo para a leitura diária — "a tua palavra é lâmpada para os meus pés e luz para o meu caminho" (Salmo 119:105). 🙏\n\nBom dia abençoado! 💛',
+    '☀️🙏 As meditações de hoje já estão no grupo!\n\n📚 Um pouquinho da Palavra de manhã transforma o dia inteiro. Não te esqueças da leitura de hoje! 📖✨\n\nTenha um ótimo dia! 💛',
+    '🌱💛 Três meditações, três oportunidades de crescer hoje!\n\n✝️ Completa o dia com a leitura diária — os pequenos momentos com Deus fazem toda a diferença. 📖🔥\n\nUm dia abençoado para todos! ☀️'
+];
+
 const client = new Client({
     authStrategy: new LocalAuth({
         dataPath: './whatsapp_auth' 
@@ -62,6 +74,10 @@ client.on('qr', (qr) => {
 
 client.on('disconnected', (reason) => {
     console.error('Sessão desconectada pelo WhatsApp:', reason);
+    if (finalizando) {
+        console.log('Desconexão esperada: encerramento controlado do cliente.');
+        return;
+    }
     process.exit(1);
 });
 
@@ -169,11 +185,58 @@ client.on('ready', async () => {
         console.log('aparecer como sucesso mesmo assim. Confirma sempre no grupo.');
 
         const houveFalha = resultados.some(r => !r.enviado);
-        client.destroy();
+
+        // ------------------------------------------------------------
+        // MENSAGEM FINAL DE MOTIVAÇÃO
+        // ------------------------------------------------------------
+        // Além do valor devocional, atua como período de tolerância para a
+        // ÚLTIMA meditação: o sendMessage() resolve a Promise quando a
+        // mensagem é aceite pela camada interna, mas a entrega real ao grupo
+        // precisa da ligação viva mais alguns segundos. O destroy() imediato
+        // após o último envio matava essa entrega — era por isso que a 3ª
+        // meditação nunca chegava ao grupo. Os 20s de espera + a própria
+        // mensagem de motivação garantem esse intervalo.
+        console.log('\n⏱️ Aguarda 20 segundos antes da mensagem final de motivação...');
+        await new Promise(resolve => setTimeout(resolve, 20000));
+
+        try {
+            const motivacao = MOTIVACOES[Math.floor(Math.random() * MOTIVACOES.length)];
+            await client.sendMessage(groupId, motivacao);
+            console.log('✅ Mensagem de motivação enviada.');
+        } catch (err) {
+            // Não-fatal: a motivação é um extra e nunca deve marcar o job
+            // como falhado nem disparar o alerta de sessão expirada.
+            console.error('⚠️ Falha ao enviar a mensagem de motivação (não-fatal):', err.message || err);
+        }
+
+        // ------------------------------------------------------------
+        // ENCERRAMENTO CONTROLADO
+        // ------------------------------------------------------------
+        // Espera de 5s para a mensagem de motivação ser entregue e para o
+        // LocalAuth sincronizar o estado da sessão em disco, seguido de um
+        // destroy() efetivamente aguardado (com teto de 15s para o caso do
+        // Puppeteer congelar no teardown e suspender o job até ao timeout).
+        finalizando = true;
+        console.log('\nA aguardar 5 segundos antes de encerrar o cliente...');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        try {
+            await Promise.race([
+                client.destroy(),
+                new Promise(resolve => setTimeout(() => {
+                    console.error('Aviso: client.destroy() demorou mais de 15s; a forçar a saída.');
+                    resolve();
+                }, 15000))
+            ]);
+            console.log('Cliente WhatsApp encerrado corretamente.');
+        } catch (err) {
+            console.error('Aviso: erro durante client.destroy() (não-fatal):', err.message || err);
+        }
         process.exit(houveFalha ? 1 : 0);
 
     } catch (err) {
         console.error('Erro fatal no processamento:', err.message || err);
+        finalizando = true;
         client.destroy();
         process.exit(1); 
     }
