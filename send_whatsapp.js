@@ -87,31 +87,61 @@ const client = new Client({
             '--no-zygote',
             '--disable-gpu'
         ]
+    },
+    // webVersionCache pin RESTAURADO (2026-09-06): o WhatsApp passou a
+    // servir uma versão que o mecanismo default da biblioteca não consegue
+    // carregar — o boot do WhatsApp Web fica suspenso antes de gerar QR
+    // ("Nem 'qr' nem 'ready' disparado em 90s"), exactamente a falha do
+    // run de 2026-09-06 20:03 UTC. O pin aponta para a versão CURRENT
+    // listada em https://wppconnect.io/whatsapp-versions (validade ~2
+    // meses: 2.3000.1046922887-alpha expira a 2026-11-06). Quando este
+    // erro voltar a aparecer, actualizar o remotePath para a nova versão
+    // current dessa página — nunca deixar um pin expirado no lugar.
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1046922887-alpha.html'
     }
-    // NOTE: webVersionCache pin REMOVED on purpose (see incident writeup).
-    // It was hardcoded to WhatsApp Web version 2.2412.54 (~Dec 2024).
-    // WhatsApp now runs the 2.3000.xxxxxxxxxx-alpha version line and
-    // *expires every pinned version ~2 months after release* (confirmed
-    // via wppconnect.io/whatsapp-versions). A 20-month-old pin is
-    // guaranteed to be rejected by WhatsApp's servers, which silently
-    // breaks both fresh QR login and session restore. Since this repo
-    // already tracks the latest whatsapp-web.js from GitHub main, the
-    // library itself handles whatever version WhatsApp serves live —
-    // no cache override needed. If a future WA update ever reintroduces
-    // the old "reading 'r' of undefined" crash, re-pin to whatever
-    // version is CURRENT at https://wppconnect.io/whatsapp-versions
-    // at that time — never leave a static pin in place for months.
 });
 
 // Global watchdog: if neither 'qr' nor 'ready' fires at all (e.g. because
 // WhatsApp's servers silently reject/hang the connection), the process
 // used to hang until the GitHub Actions job timeout with zero signal.
 // This forces a fast, loud failure so alert_failure.py actually runs today.
-let initWatchdog = setTimeout(() => {
-    console.error('Abort: Nem "qr" nem "ready" disparado em 90s. Provável incompatibilidade de versão do WhatsApp Web ou falha de rede.');
-    client.destroy();
-    process.exit(1);
-}, 90000);
+// Em vez de falhar à primeira, REINICIALIZA o cliente até MAX_TENTATIVAS_INIT
+// vezes (90s cada): bloqueios transitórios de rede/boot resolvem-se num
+// reboot da página, sem gastar o run inteiro.
+const MAX_TENTATIVAS_INIT = 3;
+let tentativasInit = 0;
+let initWatchdog = null;
+
+function armarWatchdogInit() {
+    return setTimeout(async () => {
+        tentativasInit++;
+        if (tentativasInit >= MAX_TENTATIVAS_INIT) {
+            console.error(`Abort: Nem "qr" nem "ready" disparados após ${MAX_TENTATIVAS_INIT} tentativas de 90s. Provável incompatibilidade de versão do WhatsApp Web (actualizar o webVersionCache com a versão current de https://wppconnect.io/whatsapp-versions) ou falha de rede.`);
+            client.destroy();
+            process.exit(1);
+        }
+        console.error(`Aviso: nem "qr" nem "ready" em 90s (tentativa ${tentativasInit}/${MAX_TENTATIVAS_INIT - 1}). A reinicializar o cliente...`);
+        try {
+            await Promise.race([
+                client.destroy(),
+                new Promise(resolve => setTimeout(resolve, 15000))
+            ]);
+        } catch (err) {
+            console.error('Aviso: erro durante client.destroy() na reinicialização (não-fatal):', err.message || err);
+        }
+        try {
+            client.initialize();
+        } catch (err) {
+            console.error('Erro fatal ao reinicializar o cliente:', err.message || err);
+            process.exit(1);
+        }
+        initWatchdog = armarWatchdogInit();
+    }, 90000);
+}
+
+initWatchdog = armarWatchdogInit();
 
 client.on('qr', (qr) => {
     clearTimeout(initWatchdog);
