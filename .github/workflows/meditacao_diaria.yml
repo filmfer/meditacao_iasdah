@@ -2,20 +2,20 @@ name: Publicar Meditação Diária no Telegram e WhatsApp
 
 on:
   schedule:
-    # GitHub Actions utiliza UTC. A publicação corre DE IMEDIATO, à hora a
-    # que o GitHub arranca o run — não há janela de horário obrigatória.
+    # O cron do GitHub é fixo em UTC; os Açores alternam entre UTC+1 (verão,
+    # WEST) e UTC+0 (inverno, WET). Dois disparos cobrem os dois regimes:
     #
-    # Como o scheduler do GitHub não tem SLA (atrasos de 15-60 min são
-    # comuns), há TRÊS disparos redundantes; a deduplicação diária garante
-    # que só o primeiro publica:
+    #  1) 06:23 UTC — 07:23 nos Açores no VERÃO (disparo principal); no
+    #     inverno chega 1h cedo e o guard de DST dorme até às 07:23.
+    #  2) 07:23 UTC — 07:23 nos Açores no INVERNO; no verão serve apenas
+    #     como retry (08:23 locais) se o disparo principal falhar.
     #
-    #  1) 05:00 UTC — disparo principal;
-    #  2) 06:30 UTC — redundância contra atrasos longos do scheduler;
-    #  3) 08:15 UTC — sentinela: se os anteriores falharem, publica com
-    #     atraso em vez de deixar o dia passar em branco.
-    - cron: '0 5 * * *'
-    - cron: '30 6 * * *'
-    - cron: '15 8 * * *'
+    # Minutos fora de hora DE PROPÓSITO: o scheduler agendado do GitHub é
+    # best-effort (sem SLA) e os slots no minuto zero estão saturados —
+    # minutos incomuns reduzem os atrasos. A deduplicação diária garante
+    # que só o primeiro run que completa publica.
+    - cron: '23 6 * * *'
+    - cron: '23 7 * * *'
 
   workflow_dispatch:
     inputs:
@@ -32,7 +32,7 @@ permissions:
   contents: read
   actions: read
 
-# Serializa as execuções do mesmo workflow: com três disparos diários, um
+# Serializa as execuções do mesmo workflow: com dois disparos diários, um
 # run só começa quando o anterior terminar. Assim, o run seguinte é sempre
 # travado pela deduplicação (se o anterior teve sucesso) ou serve de retry
 # (se falhou) — nunca há duas publicações em paralelo.
@@ -44,6 +44,10 @@ concurrency:
 jobs:
   build-and-send:
     runs-on: ubuntu-latest
+    # Teto duro no job: um run pendurado (ex.: browser suspenso) morre em
+    # 45 min e liberta a fila de concorrência, em vez de empurrar a
+    # publicação do dia para as horas seguintes.
+    timeout-minutes: 45
 
     steps:
 
@@ -116,6 +120,36 @@ jobs:
           else
             echo "Nenhuma publicação hoje. A prosseguir."
             echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+
+      # ============================================================
+      # GUARD DST — ALINHAR COM AS 07:23 NOS AÇORES
+      # ============================================================
+      # O cron é fixo em UTC e os Açores alternam UTC+1/UTC+0. No inverno,
+      # o disparo principal (06:23 UTC) chega 1h cedo: este step dorme até
+      # às 07:23 locais. No verão não espera nada. Dorme apenas — NUNCA
+      # falha por estar fora de uma "janela" (a janela antiga foi removida
+      # por isso mesmo). Teto de 90 min por segurança.
+      - name: Alinhar com as 07:23 dos Açores (ajuste DST)
+        if: steps.dedup.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -e
+          ALVO=$((7 * 3600 + 23 * 60))   # 07:23 locais, em segundos
+          H=$(TZ=Atlantic/Azores date +%H)
+          M=$(TZ=Atlantic/Azores date +%M)
+          AGORA=$((10#$H * 3600 + 10#$M * 60))
+          if [ "$AGORA" -lt "$ALVO" ]; then
+            ESPERA=$((ALVO - AGORA))
+            if [ "$ESPERA" -le 5400 ]; then
+              echo "A esperar ${ESPERA}s para publicar às 07:23 locais (Açores)..."
+              sleep "$ESPERA"
+            else
+              echo "Aviso: desvio de ${ESPERA}s além do teto de 90 min; a publicar de imediato."
+            fi
+          else
+            echo "Hora local $(TZ=Atlantic/Azores date +%H:%M) — já passou das 07:23; a publicar de imediato."
           fi
 
 
