@@ -247,9 +247,10 @@ client.on('ready', async () => {
             //
             // A caption de mídia tem um limite prático de ~1024 caracteres
             // (documentado na Cloud API; no Web, o excesso é truncado
-            // silenciosamente). Textos acima do limite seguem logo o
-            // caminho de recurso: miniatura com legenda curta + texto numa
-            // mensagem própria — para nunca circular texto cortado.
+            // silenciosamente). Se o texto exceder o limite, a miniatura é
+            // descartada e envia-se APENAS o texto (o link do YouTube já
+            // faz parte do texto) — nunca se publica a imagem sozinha com
+            // o link do vídeo.
             const LIMITE_CAPTION = 1024;
             let miniatura = null;
             const videoId = extrairVideoId(mensagemLimpa);
@@ -264,9 +265,9 @@ client.on('ready', async () => {
                 }
             }
 
-            const usaMensagemUnica = Boolean(miniatura) && mensagemLimpa.length <= LIMITE_CAPTION;
-            if (miniatura && !usaMensagemUnica) {
-                console.log(`Texto da meditação ${numero} tem ${mensagemLimpa.length} caracteres (limite de caption: ${LIMITE_CAPTION}); a miniatura segue com legenda curta e o texto numa mensagem separada.`);
+            if (miniatura && mensagemLimpa.length > LIMITE_CAPTION) {
+                console.log(`Texto da meditação ${numero} tem ${mensagemLimpa.length} caracteres (limite de caption: ${LIMITE_CAPTION}); a miniatura não é enviada para evitar truncamento do texto — envio apenas o texto.`);
+                miniatura = null;
             }
 
             let enviado = false;
@@ -274,25 +275,14 @@ client.on('ready', async () => {
 
             for (let tentativa = 1; tentativa <= 2 && !enviado; tentativa++) {
                 try {
-                    if (miniatura && tentativa === 1 && usaMensagemUnica) {
-                        // CAMINHO PRINCIPAL: mensagem ÚNICA — a imagem do
-                        // vídeo aparece primeiro e a caption traz o título,
-                        // o texto e os links finais da meditação.
+                    if (miniatura) {
+                        // CAMINHO ÚNICO: a imagem do vídeo aparece primeiro
+                        // e a caption traz o título, o texto e os links
+                        // finais da meditação — tudo na mesma mensagem.
                         const thumb = new MessageMedia(miniatura.mime, miniatura.data, miniatura.filename);
                         await client.sendMessage(groupId, thumb, { caption: mensagemLimpa });
                         enviado = true;
                         console.log(`Mensagem única ${numero} enviada (miniatura do vídeo + título/texto/links na caption) — tentativa ${tentativa}.`);
-                    } else if (miniatura) {
-                        // FALLBACK: legenda curta na imagem e o texto numa
-                        // mensagem própria (usado quando o texto excede o
-                        // limite de caption ou a mensagem única falhou).
-                        const thumb = new MessageMedia(miniatura.mime, miniatura.data, miniatura.filename);
-                        const captionCurta = `🎬 Ver o vídeo da meditação:\nhttps://www.youtube.com/watch?v=${videoId}`;
-                        await client.sendMessage(groupId, thumb, { caption: captionCurta });
-                        console.log(`🖼️ Miniatura da meditação ${numero} enviada com legenda curta (fallback).`);
-                        await client.sendMessage(groupId, mensagemLimpa);
-                        enviado = true;
-                        console.log(`Mensagem ${numero} (texto) enviada a seguir à miniatura — tentativa ${tentativa}.`);
                     } else {
                         await client.sendMessage(groupId, mensagemLimpa);
                         enviado = true;
@@ -302,9 +292,6 @@ client.on('ready', async () => {
                     ultimoErro = err.message || String(err);
                     console.error(`Falha ao enviar mensagem ${numero} (tentativa ${tentativa}):`, ultimoErro);
                     if (tentativa < 2) {
-                        if (miniatura && usaMensagemUnica) {
-                            console.log('A preparar o fallback em duas mensagens (imagem + texto) para a próxima tentativa...');
-                        }
                         console.log('A aguardar 15 segundos antes de tentar novamente...');
                         await new Promise(resolve => setTimeout(resolve, 15000));
                     }
