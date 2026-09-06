@@ -30,6 +30,11 @@ on:
         type: boolean
         required: false
         default: false
+      test_mode:
+        description: 'TEMPORÁRIO (testes): ignora deduplicação e a janela 07:00-08:00; publica de imediato'
+        type: boolean
+        required: false
+        default: false
 
 
 # GITHUB_TOKEN com o mínimo necessário: ler metadados (deduplicação via API
@@ -74,7 +79,7 @@ jobs:
       # ficar um dia sem meditação do que arriscar um duplicado.
 
       - name: Verificar se já foi publicado hoje
-        if: inputs.force != true
+        if: inputs.force != true && inputs.test_mode != true
         id: dedup
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -184,9 +189,11 @@ jobs:
       # - depois das 08:00 -> fora da janela: alerta Telegram imediato e
       #   falha do run, para o dia nunca passar em silêncio.
       # O input `force` contorna esta verificação (bypass manual).
+      # O input `test_mode` contorna também (bypass temporário para testes
+      # fora de hora — desativar/remover quando os testes terminarem).
 
       - name: Controlar janela de publicação (07:00-08:00)
-        if: steps.dedup.outputs.skip != 'true' && inputs.force != true
+        if: steps.dedup.outputs.skip != 'true' && inputs.force != true && inputs.test_mode != true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_PERSONAL_CHAT_ID: ${{ secrets.TELEGRAM_PERSONAL_CHAT_ID }}

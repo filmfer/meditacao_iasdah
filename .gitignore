@@ -1,0 +1,13 @@
+# Dependências locais
+node_modules/
+
+# Sessão WhatsApp — NUNCA commitar (contém credenciais da sessão)
+whatsapp_auth/
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Payloads e ficheiros gerados localmente
+whatsapp_msg.txt
+runs.json
+tg_alert.json
+tg_alert_resp.json

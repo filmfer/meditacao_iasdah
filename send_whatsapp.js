@@ -7,6 +7,17 @@ let qrTimeout;
 // não deve interpretar o fecho intencional (client.destroy()) como falha.
 let finalizando = false;
 
+// ------------------------------------------------------------
+// MODO DE PAREAMENTO (testes / recuperação de sessão)
+// ------------------------------------------------------------
+// Ativar com: WHATSAPP_PAREAMENTO=1 node send_whatsapp.js
+// Executa APENAS a autenticação: desenha o QR Code no terminal para
+// associar um novo dispositivo e, depois de lido, persiste a sessão
+// em ./whatsapp_auth e sai com sucesso. NÃO exige whatsapp_msg.txt
+// nem WHATSAPP_GROUP_ID — útil quando o artefacto whatsapp-session
+// se perdeu e é preciso religar o bot ao WhatsApp.
+const MODO_PAREAMENTO = process.env.WHATSAPP_PAREAMENTO === '1';
+
 // Mensagens finais de motivação para a leitura diária (uma é escolhida
 // aleatoriamente em cada execução). Enviada após a última meditação.
 const MOTIVACOES = [
@@ -105,7 +116,12 @@ let initWatchdog = setTimeout(() => {
 client.on('qr', (qr) => {
     clearTimeout(initWatchdog);
     if (qrTimeout) clearTimeout(qrTimeout); // don't stack timers if 'qr' auto-refreshes
-    console.error('AVISO: Sessão expirou. Novo QR Code gerado.');
+    if (MODO_PAREAMENTO) {
+        console.error('Modo de pareamento: novo QR Code gerado.');
+        console.error('Abre o WhatsApp no telemóvel (Definições > Dispositivos ligados > Ligar um dispositivo) e aponta a câmara para o QR abaixo.');
+    } else {
+        console.error('AVISO: Sessão expirou. Novo QR Code gerado.');
+    }
     require('qrcode-terminal').generate(qr, { small: true, inverse: true });
     
     // Gives you a realistic window to open the live log + WhatsApp on your
@@ -135,7 +151,34 @@ client.on('ready', async () => {
     }
 
     console.log('WhatsApp Client connection established successfully!');
-    
+
+    // ------------------------------------------------------------
+    // MODO DE PAREAMENTO: autenticar, guardar a sessão e sair.
+    // ------------------------------------------------------------
+    // Não lê payload, não envia mensagens, não precisa do grupo.
+    // A espera de 15s dá tempo ao LocalAuth sincronizar o estado da
+    // sessão para ./whatsapp_auth antes do destroy().
+    if (MODO_PAREAMENTO) {
+        console.log('✅ Autenticado com sucesso — sessão nova válida.');
+        console.log('A aguardar 15 segundos para o LocalAuth persistir a sessão em ./whatsapp_auth ...');
+        await new Promise(resolve => setTimeout(resolve, 15000));
+
+        finalizando = true;
+        try {
+            await Promise.race([
+                client.destroy(),
+                new Promise(resolve => setTimeout(() => {
+                    console.error('Aviso: client.destroy() demorou mais de 15s; a forçar a saída.');
+                    resolve();
+                }, 15000))
+            ]);
+            console.log('Sessão guardada em ./whatsapp_auth. Pareamento concluído com sucesso.');
+        } catch (err) {
+            console.error('Aviso: erro durante client.destroy() (não-fatal):', err.message || err);
+        }
+        process.exit(0);
+    }
+
     console.log('A aguardar 20 segundos para estabilização inicial e sincronização de chats...');
     await new Promise(resolve => setTimeout(resolve, 20000));
     
