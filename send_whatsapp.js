@@ -1,8 +1,6 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const fs = require('fs');
 
-let qrTimeout;
-
 // Flag de encerramento controlado: quando true, o handler 'disconnected'
 // não deve interpretar o fecho intencional (client.destroy()) como falha.
 let finalizando = false;
@@ -72,115 +70,139 @@ async function descarregarMiniatura(videoId) {
     return null;
 }
 
-const client = new Client({
-    authStrategy: new LocalAuth({
-        dataPath: './whatsapp_auth' 
-    }),
-    puppeteer: {
-        headless: true,
-        args: [
-            '--no-sandbox', 
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage', 
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu'
-        ]
-    },
-    // webVersionCache pin RESTAURADO (2026-09-06): o WhatsApp passou a
-    // servir uma versão que o mecanismo default da biblioteca não consegue
-    // carregar — o boot do WhatsApp Web fica suspenso antes de gerar QR
-    // ("Nem 'qr' nem 'ready' disparado em 90s"), exactamente a falha do
-    // run de 2026-09-06 20:03 UTC. O pin aponta para a versão CURRENT
-    // listada em https://wppconnect.io/whatsapp-versions (validade ~2
-    // meses: 2.3000.1046922887-alpha expira a 2026-11-06). Quando este
-    // erro voltar a aparecer, actualizar o remotePath para a nova versão
-    // current dessa página — nunca deixar um pin expirado no lugar.
-    webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1046922887-alpha.html'
-    }
-});
-
-// Global watchdog: if neither 'qr' nor 'ready' fires at all (e.g. because
-// WhatsApp's servers silently reject/hang the connection), the process
-// used to hang until the GitHub Actions job timeout with zero signal.
-// This forces a fast, loud failure so alert_failure.py actually runs today.
-// Em vez de falhar à primeira, REINICIALIZA o cliente até MAX_TENTATIVAS_INIT
-// vezes (90s cada): bloqueios transitórios de rede/boot resolvem-se num
-// reboot da página, sem gastar o run inteiro.
-const MAX_TENTATIVAS_INIT = 3;
-let tentativasInit = 0;
-let initWatchdog = null;
-
-function armarWatchdogInit() {
-    return setTimeout(async () => {
-        tentativasInit++;
-        if (tentativasInit >= MAX_TENTATIVAS_INIT) {
-            console.error(`Abort: Nem "qr" nem "ready" disparados após ${MAX_TENTATIVAS_INIT} tentativas de 90s. Provável incompatibilidade de versão do WhatsApp Web (actualizar o webVersionCache com a versão current de https://wppconnect.io/whatsapp-versions) ou falha de rede.`);
-            client.destroy();
-            process.exit(1);
+function criarCliente() {
+    return new Client({
+        authStrategy: new LocalAuth({
+            dataPath: './whatsapp_auth'
+        }),
+        puppeteer: {
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-accelerated-2d-canvas',
+                '--no-first-run',
+                '--no-zygote',
+                '--disable-gpu'
+            ]
+        },
+        // webVersionCache pin RESTAURADO (2026-09-06): o WhatsApp passou a
+        // servir uma versão que o mecanismo default da biblioteca não consegue
+        // carregar — o boot do WhatsApp Web fica suspenso antes de gerar QR
+        // ("Nem 'qr' nem 'ready' disparado em 90s"), exactamente a falha do
+        // run de 2026-09-06 20:03 UTC. O pin aponta para a versão CURRENT
+        // listada em https://wppconnect.io/whatsapp-versions (validade ~2
+        // meses: 2.3000.1046922887-alpha expira a 2026-11-06). Quando este
+        // erro voltar a aparecer, actualizar o remotePath para a nova versão
+        // current dessa página — nunca deixar um pin expirado no lugar.
+        webVersionCache: {
+            type: 'remote',
+            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1046922887-alpha.html'
         }
-        console.error(`Aviso: nem "qr" nem "ready" em 90s (tentativa ${tentativasInit}/${MAX_TENTATIVAS_INIT - 1}). A reinicializar o cliente...`);
-        try {
-            await Promise.race([
-                client.destroy(),
-                new Promise(resolve => setTimeout(resolve, 15000))
-            ]);
-        } catch (err) {
-            console.error('Aviso: erro durante client.destroy() na reinicialização (não-fatal):', err.message || err);
-        }
-        try {
-            client.initialize();
-        } catch (err) {
-            console.error('Erro fatal ao reinicializar o cliente:', err.message || err);
-            process.exit(1);
-        }
-        initWatchdog = armarWatchdogInit();
-    }, 90000);
+    });
 }
 
-initWatchdog = armarWatchdogInit();
+// ------------------------------------------------------------
+// AUTENTICAÇÃO COM RETRY (fábrica de clientes)
+// ------------------------------------------------------------
+// Cada tentativa cria um Cliente NOVO: re-utilizar a mesma instância
+// depois de um destroy() deixa referências a páginas mortas do browser
+// e crasha a reinicialização com "Target closed" (falha do run de
+// 2026-09-06). O watchdog de 90s fecha cada tentativa; falhas
+// transitórias de rede/boot são absorvidas sem gastar o run inteiro.
+const MAX_TENTATIVAS_INIT = 3;
+const TEMPO_WATCHDOG_INIT = 90000;
 
-client.on('qr', (qr) => {
-    clearTimeout(initWatchdog);
-    if (qrTimeout) clearTimeout(qrTimeout); // don't stack timers if 'qr' auto-refreshes
-    if (MODO_PAREAMENTO) {
-        console.error('Modo de pareamento: novo QR Code gerado.');
-        console.error('Abre o WhatsApp no telemóvel (Definições > Dispositivos ligados > Ligar um dispositivo) e aponta a câmara para o QR abaixo.');
-    } else {
-        console.error('AVISO: Sessão expirou. Novo QR Code gerado.');
-    }
-    require('qrcode-terminal').generate(qr, { small: true, inverse: true });
-    
-    // Gives you a realistic window to open the live log + WhatsApp on your
-    // phone + scan. 90s was too tight once you account for GH Actions'
-    // own log-streaming lag; 5 minutes gives real breathing room.
-    qrTimeout = setTimeout(() => { 
-        console.error('Abort: QR Code não foi lido a tempo.');
-        client.destroy(); 
-        process.exit(1); 
-    }, 300000);
-});
+function autenticar() {
+    return new Promise((resolveCliente) => {
+        (async () => {
+            for (let tentativa = 1; tentativa <= MAX_TENTATIVAS_INIT; tentativa++) {
+                const client = criarCliente();
+                let autenticado = false;
+                let qrTimeout = null;
 
-client.on('disconnected', (reason) => {
-    console.error('Sessão desconectada pelo WhatsApp:', reason);
-    if (finalizando) {
-        console.log('Desconexão esperada: encerramento controlado do cliente.');
-        return;
-    }
-    process.exit(1);
-});
+                const resultado = await new Promise((resolve) => {
+                    const watchdog = setTimeout(() => resolve('timeout'), TEMPO_WATCHDOG_INIT);
 
-client.on('ready', async () => {
-    // Cancel any pending self-destruct timeouts now that we're fully authenticated
-    clearTimeout(initWatchdog);
-    if (qrTimeout) {
-        clearTimeout(qrTimeout);
-    }
+                    client.on('qr', (qr) => {
+                        clearTimeout(watchdog);
+                        if (qrTimeout) clearTimeout(qrTimeout); // não acumular timers se o 'qr' refrescar
+                        if (MODO_PAREAMENTO) {
+                            console.error('Modo de pareamento: novo QR Code gerado.');
+                            console.error('Abre o WhatsApp no telemóvel (Definições > Dispositivos ligados > Ligar um dispositivo) e aponta a câmara para o QR abaixo.');
+                        } else {
+                            console.error('AVISO: Sessão expirou. Novo QR Code gerado.');
+                        }
+                        require('qrcode-terminal').generate(qr, { small: true, inverse: true });
 
-    console.log('WhatsApp Client connection established successfully!');
+                        // Janela realista para abrir o log + WhatsApp no telemóvel
+                        // e scanear (5 minutos, cobrindo o lag de streaming do log).
+                        qrTimeout = setTimeout(() => {
+                            console.error('Abort: QR Code não foi lido a tempo.');
+                            process.exit(1);
+                        }, 300000);
+                    });
+
+                    client.on('ready', () => {
+                        clearTimeout(watchdog);
+                        if (qrTimeout) clearTimeout(qrTimeout);
+                        autenticado = true;
+                        resolve('ready');
+                    });
+
+                    client.on('auth_failure', (msg) => {
+                        clearTimeout(watchdog);
+                        console.error('Falha na assinatura de autenticação:', msg);
+                        resolve('auth_failure');
+                    });
+
+                    client.on('disconnected', (reason) => {
+                        if (finalizando) {
+                            console.log('Desconexão esperada: encerramento controlado do cliente.');
+                            return;
+                        }
+                        if (autenticado) {
+                            console.error('Sessão desconectada pelo WhatsApp:', reason);
+                            process.exit(1);
+                        }
+                        clearTimeout(watchdog);
+                        resolve('disconnected');
+                    });
+
+                    // SEMPRE com catch: uma rejeição não pode crashar o
+                    // processo (unhandled rejections são fatais no Node 22).
+                    client.initialize().catch((err) => {
+                        clearTimeout(watchdog);
+                        console.error('Erro durante client.initialize():', err.message || err);
+                        resolve('init_error');
+                    });
+                });
+
+                if (resultado === 'ready') {
+                    console.log(`✅ WhatsApp autenticado (tentativa ${tentativa}/${MAX_TENTATIVAS_INIT}).`);
+                    resolveCliente(client);
+                    return;
+                }
+
+                console.error(`Tentativa ${tentativa}/${MAX_TENTATIVAS_INIT} falhou (${resultado}). A destruir o cliente e a tentar de novo...`);
+                try {
+                    await Promise.race([
+                        client.destroy(),
+                        new Promise((resolve) => setTimeout(resolve, 15000))
+                    ]);
+                } catch (err) {
+                    console.error('Aviso: erro durante client.destroy() entre tentativas (não-fatal):', err.message || err);
+                }
+            }
+
+            console.error(`Abort: autenticação falhou após ${MAX_TENTATIVAS_INIT} tentativas de ${TEMPO_WATCHDOG_INIT / 1000}s. Provável incompatibilidade de versão do WhatsApp Web (actualizar o webVersionCache com a versão current de https://wppconnect.io/whatsapp-versions) ou falha de rede.`);
+            process.exit(1);
+        })();
+    });
+}
+
+async function executarEnvio(client) {
 
     // ------------------------------------------------------------
     // MODO DE PAREAMENTO: autenticar, guardar a sessão e sair.
@@ -414,13 +436,23 @@ client.on('ready', async () => {
         console.error('Erro fatal no processamento:', err.message || err);
         finalizando = true;
         client.destroy();
-        process.exit(1); 
+        process.exit(1);
     }
-});
+}
 
-client.on('auth_failure', (msg) => {
-    console.error('Falha na assinatura de autenticação:', msg);
-    process.exit(1);
-});
-
-client.initialize();
+// ------------------------------------------------------------
+// ARRANQUE
+// ------------------------------------------------------------
+// Autentica (com retries e clientes frescos por tentativa) e só depois
+// corre o pipeline de envio. O esgotamento das tentativas de autenticação
+// faz exit(1) dentro de autenticar(); este catch cobre o resto.
+(async () => {
+    try {
+        const client = await autenticar();
+        await executarEnvio(client);
+    } catch (err) {
+        console.error('Erro fatal no arranque:', err.message || err);
+        finalizando = true;
+        process.exit(1);
+    }
+})();
