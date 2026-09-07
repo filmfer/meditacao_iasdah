@@ -85,7 +85,13 @@ function criarCliente() {
                 '--no-first-run',
                 '--no-zygote',
                 '--disable-gpu'
-            ]
+            ],
+            // protocolTimeout aumentado para 3 minutos (2026-09-07): previne
+            // "Runtime.callFunctionOn timed out" no CI do GitHub Actions, onde
+            // o browser fica mais lento após atualização do WhatsApp Web em
+            // julho de 2026. O valor default (60s) é insuficiente para operações
+            // do WhatsApp Web neste ambiente.
+            protocolTimeout: 180000
         },
         // webVersionCache pin RESTAURADO (2026-09-06): o WhatsApp passou a
         // servir uma versão que o mecanismo default da biblioteca não consegue
