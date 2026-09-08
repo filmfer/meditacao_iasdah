@@ -14,8 +14,11 @@ on:
     # best-effort (sem SLA) e os slots no minuto zero estão saturados —
     # minutos incomuns reduzem os atrasos. A deduplicação diária garante
     # que só o primeiro run que completa publica.
+      timezone: 'Etc/GMT+1'
     - cron: '23 6 * * *'
-    - cron: '23 7 * * *'
+    timezone: 'Etc/GMT+1'
+    # - cron: '23 7 * * *'
+    # timezone: 'Etc/GMT+1'
 
   workflow_dispatch:
     inputs:
@@ -45,9 +48,9 @@ jobs:
   build-and-send:
     runs-on: ubuntu-latest
     # Teto duro no job: um run pendurado (ex.: browser suspenso) morre em
-    # 45 min e liberta a fila de concorrência, em vez de empurrar a
+    # 15 min e liberta a fila de concorrência, em vez de empurrar a
     # publicação do dia para as horas seguintes.
-    timeout-minutes: 45
+    timeout-minutes: 15
 
     steps:
 
