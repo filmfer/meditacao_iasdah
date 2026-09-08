@@ -14,9 +14,8 @@ on:
     # best-effort (sem SLA) e os slots no minuto zero estão saturados —
     # minutos incomuns reduzem os atrasos. A deduplicação diária garante
     # que só o primeiro run que completa publica.
-      timezone: 'Etc/GMT+1'
     - cron: '23 6 * * *'
-    timezone: 'Etc/GMT+1'
+      timezone: 'Etc/GMT+1'
     # - cron: '23 7 * * *'
     # timezone: 'Etc/GMT+1'
 
