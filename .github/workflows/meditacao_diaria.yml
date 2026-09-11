@@ -364,14 +364,42 @@ jobs:
         if: steps.whatsapp.outcome == 'success' && steps.dedup.outputs.skip != 'true'
         shell: bash
         run: |
-          if [ -d whatsapp_auth ] && [ -s whatsapp_auth/session/default_creds.json ]; then
+          # A sessão LocalAuth (whatsapp-web.js) NÃO gera default_creds.json.
+          # A autenticação vive no perfil Chromium em session/Default/, nas
+          # stores Locale Storage/leveldb e IndexedDB. Guardamos a sessão se
+          # existir pelo menos uma dessas stores com dados — o que comprova
+          # uma autenticação real, em vez de um ficheiro que nunca existiu.
+          SESSION_DEFAULT="whatsapp_auth/session/Default"
+          LVLDB="$SESSION_DEFAULT/Local Storage/leveldb"
+          INDEXEDDB="$SESSION_DEFAULT/IndexedDB"
+
+          SESSION_VALIDA="false"
+          if [ -d "$LVLDB" ] && [ -s "$LVLDB/CURRENT" ]; then
+            SESSION_VALIDA="true"
+          elif [ -d "$INDEXEDDB" ] && [ -n "$(find "$INDEXEDDB" -type f 2>/dev/null | head -n1)" ]; then
+            SESSION_VALIDA="true"
+          fi
+
+          if [ "$SESSION_VALIDA" = "true" ]; then
             tar czf whatsapp-session.tar.gz whatsapp_auth
             echo "===== Tamanho do tarball ====="
             ls -lh whatsapp-session.tar.gz
             echo "===== Conteúdo do tarball ====="
-            tar tzf whatsapp-session.tar.gz | head -30
+            # IMPORTANTE: nunca listar com `tar ... | head` sob `-o pipefail` —
+            # fechar o pipe após 30 linhas envia SIGPIPE ao tar ("stdout: write
+            # error", exit 2) e falha o passo MESMO com o tarball gerado.
+            tar tzf whatsapp-session.tar.gz 2>/dev/null | head -30 || true
           else
-            echo "ERRO: Pasta whatsapp_auth ausente ou credenciais da sessão não encontradas. A NÃO guardar artefacto (preservar o anterior)."
+            echo "ERRO: Sessão WhatsApp não encontrada (nem Local Storage/leveldb nem IndexedDB em session/Default/). A NÃO guardar artefacto (preservar o anterior)."
+            echo "----- Diagnóstico da pasta whatsapp_auth -----"
+            du -sh "$SESSION_DEFAULT" 2>/dev/null || echo "Default/ não existe"
+            echo "----- Ficheiros em session/Default (até profundidade 3) -----"
+            if [ -d "$SESSION_DEFAULT" ]; then
+              find "$SESSION_DEFAULT" -maxdepth 3 -type f 2>/dev/null | head -60
+            else
+              echo "session/Default não existe; conteúdo de whatsapp_auth:"
+              find whatsapp_auth -maxdepth 3 2>/dev/null | head -60
+            fi
             exit 1
           fi
 
