@@ -385,7 +385,10 @@ jobs:
             echo "===== Tamanho do tarball ====="
             ls -lh whatsapp-session.tar.gz
             echo "===== Conteúdo do tarball ====="
-            tar tzf whatsapp-session.tar.gz | head -30
+            # IMPORTANTE: nunca listar com `tar ... | head` sob `-o pipefail` —
+            # fechar o pipe após 30 linhas envia SIGPIPE ao tar ("stdout: write
+            # error", exit 2) e falha o passo MESMO com o tarball gerado.
+            tar tzf whatsapp-session.tar.gz 2>/dev/null | head -30 || true
           else
             echo "ERRO: Sessão WhatsApp não encontrada (nem Local Storage/leveldb nem IndexedDB em session/Default/). A NÃO guardar artefacto (preservar o anterior)."
             echo "----- Diagnóstico da pasta whatsapp_auth -----"
