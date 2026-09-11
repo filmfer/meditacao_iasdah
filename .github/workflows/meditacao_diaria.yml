@@ -239,8 +239,23 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: meditacao_diaria.yml
           name: whatsapp-session
-          path: whatsapp_auth
+          path: .
           if_no_artifact_found: warn
+
+      # O artefacto é guardado compactado (tar.gz) para reduzir o tamanho
+      # de 600MB+ (caches do Chromium) para ~30-80MB. Descompactar ao
+      # restaurar e remover o tarball.
+      - name: Descompactar a sessão do WhatsApp
+        if: steps.dedup.outputs.skip != 'true'
+        shell: bash
+        run: |
+          if [ -f whatsapp-session.tar.gz ]; then
+            tar xzf whatsapp-session.tar.gz
+            rm -f whatsapp-session.tar.gz
+            echo "Sessão descompactada com sucesso."
+          else
+            echo "Aviso: tarball whatsapp-session.tar.gz não encontrado. Sessão indisponível — será necessário pareamento via QR Code."
+          fi
 
 
       # ============================================================
@@ -274,6 +289,7 @@ jobs:
       # ============================================================
 
       - name: Executar envio automatizado para o WhatsApp
+        id: whatsapp
         if: steps.dedup.outputs.skip != 'true'
         env:
           WHATSAPP_GROUP_ID: ${{ secrets.WHATSAPP_GROUP_ID }}
@@ -293,16 +309,71 @@ jobs:
 
 
       # ============================================================
-      # LIMPEZA DA SESSÃO WHATSAPP
+      # LIMPEZA DA SESSÃO WHATSAPP (SÓ APÓS SUCESSO)
       # ============================================================
+      # @IMPORTANTE: A limpeza, compressão e upload estão CONDICIONADOS ao
+      # sucesso do passo "whatsapp" (steps.whatsapp.outcome == 'success').
+      # Motivo: se o envio falhar (sessão expirada → QR não lido → exit 1),
+      # os passos with `if: always()` iriam sobrescrever o artefacto VÁLIDO
+      # anterior com um tarball vazio/corrompido — e no run seguinte o bot
+      # apanhava essa sessão lixo e era obrigado a fazer QR novamente. É
+      # EXATAMENTE por isso que a sessão expirava todos os dias.
+      # Só guardamos a sessão quando o run comprovadamente a utilizou e
+      # manteve autenticada (enviou com sucesso). Em dias de falha preserva-se
+      # o último artefacto bom — o bot retoma do último estado válido.
 
-      - name: Limpar ficheiros socket antes do upload
-        if: always()
+      - name: Limpar caches desnecessárias da sessão (redução do artefacto)
+        if: steps.whatsapp.outcome == 'success' && steps.dedup.outputs.skip != 'true'
+        shell: bash
         run: |
+          # Remover ficheiros de bloqueio do singleton (conflitos entre processos)
           rm -f \
             whatsapp_auth/session/SingletonSocket \
             whatsapp_auth/session/SingletonLock \
             whatsapp_auth/session/SingletonCookie
+
+          # Remover caches volumosas do perfil Chromium — não são necessárias
+          # para persistir a sessão autenticada; são apenas lixo do browser.
+          rm -rf \
+            whatsapp_auth/session/Default/Cache \
+            whatsapp_auth/session/Default/Code\ Cache \
+            whatsapp_auth/session/Default/GPUCache \
+            whatsapp_auth/session/Default/Service\ Worker/CacheStorage \
+            whatsapp_auth/session/Default/Service\ Worker/ScriptCache \
+            whatsapp_auth/session/Default/GrShaderCache \
+            whatsapp_auth/session/Default/DawnCache \
+            whatsapp_auth/session/Default/Dictionaries \
+            whatsapp_auth/session/Default/Crashpad \
+            whatsapp_auth/session/Default/component_crx_cache \
+            whatsapp_auth/session/Default/Storage/ext \
+            whatsapp_auth/session/Default/blob_storage \
+            whatsapp_auth/session/Default/File\ System
+
+          echo "===== Tamanho da sessão após limpeza ====="
+          du -sh whatsapp_auth 2>/dev/null || echo "whatsapp_auth não existe (sessão não disponível)"
+
+
+      # ============================================================
+      # COMPRIMIR SESSÃO WHATSAPP (tar.gz)
+      # ============================================================
+      # Compacta a pasta da sessão para reduzir ainda mais o tamanho do
+      # artefacto armazenado no GitHub Actions. O GitHub limita artefactos
+      # a 5GB, mas o upload/download é muito mais rápido com um tarball.
+
+      - name: Comprimir sessão antes do upload
+        if: steps.whatsapp.outcome == 'success' && steps.dedup.outputs.skip != 'true'
+        shell: bash
+        run: |
+          if [ -d whatsapp_auth ] && [ -s whatsapp_auth/session/default_creds.json ]; then
+            tar czf whatsapp-session.tar.gz whatsapp_auth
+            echo "===== Tamanho do tarball ====="
+            ls -lh whatsapp-session.tar.gz
+            echo "===== Conteúdo do tarball ====="
+            tar tzf whatsapp-session.tar.gz | head -30
+          else
+            echo "ERRO: Pasta whatsapp_auth ausente ou credenciais da sessão não encontradas. A NÃO guardar artefacto (preservar o anterior)."
+            exit 1
+          fi
 
 
       # ============================================================
@@ -311,10 +382,10 @@ jobs:
 
       - name: Guardar Estado Atualizado da Sessão do WhatsApp
         uses: actions/upload-artifact@v4.4.0
-        if: always() && steps.dedup.outputs.skip != 'true'
+        if: steps.whatsapp.outcome == 'success' && steps.dedup.outputs.skip != 'true'
         with:
           name: whatsapp-session
-          path: whatsapp_auth
+          path: whatsapp-session.tar.gz
           retention-days: 90
           overwrite: true
           include-hidden-files: true
