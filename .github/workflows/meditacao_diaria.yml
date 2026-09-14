@@ -26,6 +26,11 @@ on:
         type: boolean
         required: false
         default: false
+      pareamento:
+        description: 'Modo pareamento: gera QR Code no log, guarda a nova sessão e NÃO publica (recupera a sessão quando o artefacto se perde/expira)'
+        type: boolean
+        required: false
+        default: false
 
 
 # GITHUB_TOKEN com o mínimo necessário: ler metadados (deduplicação via API
@@ -74,7 +79,7 @@ jobs:
       # ficar um dia sem meditação do que arriscar um duplicado.
 
       - name: Verificar se já foi publicado hoje
-        if: inputs.force != true
+        if: inputs.force != true && inputs.pareamento != true
         id: dedup
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -134,7 +139,7 @@ jobs:
       # falha por estar fora de uma "janela" (a janela antiga foi removida
       # por isso mesmo). Teto de 90 min por segurança.
       - name: Alinhar com as 07:23 dos Açores (ajuste DST)
-        if: steps.dedup.outputs.skip != 'true'
+        if: steps.dedup.outputs.skip != 'true' && inputs.pareamento != true
         shell: bash
         run: |
           set -e
@@ -275,7 +280,7 @@ jobs:
       # ============================================================
 
       - name: Executar o script de publicação (Scraping & Telegram)
-        if: steps.dedup.outputs.skip != 'true'
+        if: steps.dedup.outputs.skip != 'true' && inputs.pareamento != true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -293,6 +298,11 @@ jobs:
         if: steps.dedup.outputs.skip != 'true'
         env:
           WHATSAPP_GROUP_ID: ${{ secrets.WHATSAPP_GROUP_ID }}
+          # Em modo pareamento: autentica via QR, persiste ./whatsapp_auth e
+          # sai sem enviar mensagens nem exigir whatsapp_msg.txt. Os passos
+          # de compressão/upload abaixo correm normalmente e guardam a nova
+          # sessão no artefacto whatsapp-session.
+          WHATSAPP_PAREAMENTO: ${{ inputs.pareamento == true && '1' || '0' }}
         run: node send_whatsapp.js
 
 
