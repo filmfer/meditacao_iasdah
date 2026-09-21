@@ -5,6 +5,22 @@ const fs = require('fs');
 // não deve interpretar o fecho intencional (client.destroy()) como falha.
 let finalizando = false;
 
+// Marker de sessão autenticada: escrito quando o evento 'ready' dispara.
+// O workflow usa-o para decidir se a sessão deve ser guardada no
+// artefacto — garante que a sessão fresca é persistida sempre que a
+// autenticação teve sucesso, mesmo que o envio falhe depois (sem isto,
+// a sessão era descartada e caducava a cada ~2 dias).
+const MARKER_SESSAO = './whatsapp_auth/.autenticado';
+
+function marcarSessaoAutenticada() {
+    try {
+        fs.mkdirSync('./whatsapp_auth', { recursive: true });
+        fs.writeFileSync(MARKER_SESSAO, String(Date.now()));
+    } catch (err) {
+        console.error('Aviso: não foi possível escrever o marker de sessão:', err.message || err);
+    }
+}
+
 // ------------------------------------------------------------
 // MODO DE PAREAMENTO (testes / recuperação de sessão)
 // ------------------------------------------------------------
@@ -154,6 +170,7 @@ function autenticar() {
                         clearTimeout(watchdog);
                         if (qrTimeout) clearTimeout(qrTimeout);
                         autenticado = true;
+                        marcarSessaoAutenticada();
                         resolve('ready');
                     });
 
