@@ -144,6 +144,18 @@ function autenticar() {
                 let autenticado = false;
                 let qrTimeout = null;
 
+                // Limpa o timer do QR de tentativas anteriores. Sem isto, o
+                // setTimeout(300000) com process.exit(1) de uma tentativa
+                // fracassada sobrevive ao client.destroy() e MATA o processo
+                // à mesma 5 minutos depois — mesmo que uma tentativa seguinte
+                // já tenha autenticado e esteja a meio do envio.
+                const limparQrTimeout = () => {
+                    if (qrTimeout) {
+                        clearTimeout(qrTimeout);
+                        qrTimeout = null;
+                    }
+                };
+
                 const resultado = await new Promise((resolve) => {
                     const watchdog = setTimeout(() => resolve('timeout'), TEMPO_WATCHDOG_INIT);
 
@@ -168,7 +180,7 @@ function autenticar() {
 
                     client.on('ready', () => {
                         clearTimeout(watchdog);
-                        if (qrTimeout) clearTimeout(qrTimeout);
+                        limparQrTimeout();
                         autenticado = true;
                         marcarSessaoAutenticada();
                         resolve('ready');
@@ -208,6 +220,9 @@ function autenticar() {
                     return;
                 }
 
+                // Cancelar o timer do QR ANTES de destruir o cliente: caso
+                // contrário dispara process.exit(1) durante a próxima tentativa.
+                limparQrTimeout();
                 console.error(`Tentativa ${tentativa}/${MAX_TENTATIVAS_INIT} falhou (${resultado}). A destruir o cliente e a tentar de novo...`);
                 try {
                     await Promise.race([

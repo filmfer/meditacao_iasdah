@@ -2,34 +2,33 @@ name: Publicar Meditação Diária no Telegram e WhatsApp
 
 on:
   schedule:
-    # Cron fixo em UTC; os Açores alternam UTC+1 (verão) / UTC+0 (inverno).
-    # Minutos fora de hora de propósito: slots no minuto zero estão saturados.
-    # A deduplicação diária garante que só o primeiro run que completa publica.
+    # Cron fixo em UTC: 06:23 UTC = 07:23 locais (Açores) no verão.
+    # No inverno o step "Esperar pelas 07:23" dorme 1h antes de publicar,
+    # mantendo a hora local constante o ano inteiro.
+    # Minutos fora de hora de propósito: o scheduler do GitHub é best-effort
+    # e minutos incomuns reduzem os atrasos dos slots saturados.
     - cron: '23 6 * * *'
-      timezone: 'Etc/GMT+1'
 
   workflow_dispatch:
     inputs:
-      force:
-        description: 'Ignorar a verificação de duplicação diária e publicar na mesma'
+      pareamento:
+        description: 'Modo pareamento: gera QR Code no log, guarda a nova sessão e NÃO publica (recupera a sessão quando o artefacto se perde/expira)'
         type: boolean
         required: false
         default: false
 
-# Mínimo necessário: ler metadados (deduplicação) e descarregar artefacto.
-# Nota: nenhum passo assume formato ou comprimento do token (compatível com
-# o novo formato stateless de GitHub App tokens, ghs_... ~520 chars) — o
-# token é sempre injetado via Authorization header, sem validação própria.
+# Mínimo necessário: ler metadados e descarregar o artefacto da sessão.
+# Nota: tokens de GitHub App passam ao formato stateless (ghs_... ~520
+# chars) — nenhum passo valida formato ou comprimento de token; o token é
+# sempre injetado via secret no header Authorization das actions oficiais.
 permissions:
   contents: read
   actions: read
 
-# Serializa execuções: o run seguinte é travado pela deduplicação (se o
-# anterior teve sucesso) ou serve de retry (se falhou).
+# Um run de cada vez; nunca duas publicações em paralelo.
 concurrency:
   group: meditacao-diaria
   cancel-in-progress: false
-
 
 jobs:
   build-and-send:
@@ -40,49 +39,42 @@ jobs:
       - name: Check out uma cópia do repositório
         uses: actions/checkout@v4
 
+      # ============================================================
+      # ALINHAR COM AS 07:23 NOS AÇORES
+      # ============================================================
+      # O cron é fixo em UTC (06:23) e os Açores alternam UTC+1 (verão) /
+      # UTC+0 (inverno). No inverno este step dorme 1h para publicar às
+      # 07:23 locais; no verão não espera. Teto de 90 min.
+      - name: Esperar pelas 07:23 locais (Açores)
+        if: github.event_name == 'schedule'
+        run: python workflow_steps.py
+
+      # ============================================================
+      # AMBIENTE
+      # ============================================================
+
       - name: Configurar o Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Instalar dependências Python
-        run: pip install requests beautifulsoup4 urllib3
+      - name: Configurar o Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
-      - name: Verificar se já foi publicado hoje
-        id: dedup
-        if: inputs.force != true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python workflow_steps.py dedup
-
-      - name: Alinhar com as 07:23 dos Açores (ajuste DST)
-        if: steps.dedup.outputs.skip != 'true'
-        run: python workflow_steps.py aguardar
-
-      - name: Diagnóstico de horário
-        if: steps.dedup.outputs.skip != 'true'
-        run: |
-          echo "UTC:            $(date -u '+%F %T %Z (%z)')"
-          echo "Runner:         $(date '+%F %T %Z (%z)')"
-          echo "Açores:         $(TZ=Atlantic/Azores date '+%F %T %Z (%z)')"
-          echo "Tipo de execução: ${{ github.event_name }}"
-
-      - name: Instalar o locale de Português Europeu (pt_PT)
-        if: steps.dedup.outputs.skip != 'true'
+      - name: Instalar o locale pt_PT
         run: |
           sudo apt-get update
           sudo apt-get install -y language-pack-pt
           sudo locale-gen pt_PT.UTF-8
           sudo update-locale LANG=pt_PT.UTF-8
 
-      - name: Configurar o Node.js Environment
-        if: steps.dedup.outputs.skip != 'true'
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
+      # ============================================================
+      # SESSÃO WHATSAPP: RESTAURAR
+      # ============================================================
 
-      - name: Restaurar o Estado da Sessão do WhatsApp
-        if: steps.dedup.outputs.skip != 'true'
+      - name: Restaurar a sessão do WhatsApp
         uses: dawidd6/action-download-artifact@v6
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -91,23 +83,31 @@ jobs:
           path: .
           if_no_artifact_found: warn
 
+      # O artefacto é guardado compactado (tar.gz) para reduzir o tamanho
+      # de 600MB+ (caches do Chromium) para ~30-80MB.
       - name: Descompactar a sessão do WhatsApp
-        if: steps.dedup.outputs.skip != 'true'
+        shell: bash
         run: |
           if [ -f whatsapp-session.tar.gz ]; then
             tar xzf whatsapp-session.tar.gz
             rm -f whatsapp-session.tar.gz
             echo "Sessão descompactada com sucesso."
           else
-            echo "Aviso: tarball não encontrado — será necessário pareamento via QR Code."
+            echo "Aviso: tarball não encontrado. Será necessário pareamento via QR Code (workflow_dispatch com pareamento=true)."
           fi
 
-      - name: Instalar dependências Node.js
-        if: steps.dedup.outputs.skip != 'true'
-        run: npm install whatsapp-web.js@1.34.7 qrcode-terminal
+      - name: Instalar dependências (Python & Node.js)
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 urllib3
+          npm install whatsapp-web.js@1.34.7 qrcode-terminal
 
-      - name: Executar o script de publicação (Scraping & Telegram)
-        if: steps.dedup.outputs.skip != 'true'
+      # ============================================================
+      # PUBLICAÇÕES
+      # ============================================================
+
+      - name: Publicar no Telegram (Scraping & envio)
+        if: inputs.pareamento != true
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -115,14 +115,17 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: python meditacao_iasdah.py
 
-      - name: Executar envio automatizado para o WhatsApp
+      - name: Enviar para o WhatsApp
         id: whatsapp
-        if: steps.dedup.outputs.skip != 'true'
         env:
           WHATSAPP_GROUP_ID: ${{ secrets.WHATSAPP_GROUP_ID }}
+          # Em modo pareamento: autentica via QR, persiste ./whatsapp_auth e
+          # sai sem enviar mensagens nem exigir whatsapp_msg.txt. Os passos
+          # de compressão/upload abaixo guardam a nova sessão no artefacto.
+          WHATSAPP_PAREAMENTO: ${{ inputs.pareamento == true && '1' || '0' }}
         run: node send_whatsapp.js
 
-      - name: Interceptar e Tratar Alerta de Sessão Expirada
+      - name: Alerta de falha
         if: failure()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -130,22 +133,22 @@ jobs:
         run: python alert_failure.py
 
       # ============================================================
-      # GUARDAR SESSÃO WHATSAPP (só se autenticada)
+      # SESSÃO WHATSAPP: GUARDAR (SÓ SE AUTENTICADA)
       # ============================================================
-      # Condição baseada no marker .autenticado (escrito pelo send_whatsapp.js
-      # quando o evento 'ready' dispara), NÃO no sucesso do envio: a sessão
-      # fresca é preservada mesmo que o envio falhe depois da autenticação —
-      # é isso que mantém a sessão válida pelos 90 dias de retenção em vez
-      # de caducar a cada ~2 dias. Se o envio falhou ANTES de autenticar
-      # (QR não lido), o marker não existe e o artefacto anterior é preservado.
-      - name: Comprimir e guardar a sessão do WhatsApp
-        if: steps.dedup.outputs.skip != 'true'
+      # Condicionado ao marker .autenticado (escrito pelo send_whatsapp.js
+      # no evento 'ready'), NÃO ao sucesso do envio: a sessão fresca é
+      # preservada mesmo que o envio falhe depois da autenticação — é isso
+      # que mantém a sessão válida pelos 90 dias de retenção em vez de
+      # caducar a cada ~2 dias. Se a autenticação falhou (QR não lido),
+      # o marker não existe e o artefacto anterior fica intacto.
+      - name: Limpar caches desnecessárias da sessão
+        if: hashFiles('whatsapp_auth/.autenticado') != ''
+        shell: bash
         run: |
-          if [ ! -f whatsapp_auth/.autenticado ]; then
-            echo "Sessão não autenticada neste run — a preservar o artefacto anterior."
-            exit 0
-          fi
-          rm -f whatsapp_auth/session/Singleton{Socket,Lock,Cookie}
+          rm -f \
+            whatsapp_auth/session/SingletonSocket \
+            whatsapp_auth/session/SingletonLock \
+            whatsapp_auth/session/SingletonCookie
           rm -rf \
             whatsapp_auth/session/Default/Cache \
             whatsapp_auth/session/Default/Code\ Cache \
@@ -160,12 +163,35 @@ jobs:
             whatsapp_auth/session/Default/Storage/ext \
             whatsapp_auth/session/Default/blob_storage \
             whatsapp_auth/session/Default/File\ System
-          tar czf whatsapp-session.tar.gz whatsapp_auth
-          du -sh whatsapp-session.tar.gz
+          du -sh whatsapp_auth 2>/dev/null || echo "whatsapp_auth não existe"
 
-      - name: Upload do artefacto da sessão
-        if: steps.dedup.outputs.skip != 'true' && hashFiles('whatsapp-session.tar.gz') != ''
+      - name: Comprimir sessão
+        if: hashFiles('whatsapp_auth/.autenticado') != ''
+        shell: bash
+        run: |
+          # A sessão LocalAuth vive no perfil Chromium em session/Default/
+          # (Local Storage/leveldb e IndexedDB) — a presença de qualquer uma
+          # das stores comprova autenticação real.
+          DEFAULT="whatsapp_auth/session/Default"
+          LVLDB="$DEFAULT/Local Storage/leveldb"
+          IDB="$DEFAULT/IndexedDB"
+
+          if { [ -d "$LVLDB" ] && [ -s "$LVLDB/CURRENT" ]; } || \
+             [ -n "$(find "$IDB" -type f 2>/dev/null | head -n1)" ]; then
+            tar czf whatsapp-session.tar.gz whatsapp_auth
+            ls -lh whatsapp-session.tar.gz
+            # Nunca `tar | head` sob pipefail: o SIGPIPE mata o tar mesmo
+            # com o tarball gerado.
+            tar tzf whatsapp-session.tar.gz 2>/dev/null | head -30 || true
+          else
+            echo "ERRO: Sessão não encontrada em session/Default/. A preservar o artefacto anterior."
+            find whatsapp_auth -maxdepth 3 2>/dev/null | head -60
+            exit 1
+          fi
+
+      - name: Guardar sessão do WhatsApp
         uses: actions/upload-artifact@v4.4.0
+        if: hashFiles('whatsapp_auth/.autenticado') != ''
         with:
           name: whatsapp-session
           path: whatsapp-session.tar.gz
