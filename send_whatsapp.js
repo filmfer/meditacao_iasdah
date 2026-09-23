@@ -335,6 +335,49 @@ async function executarEnvio(client) {
 
     try {
         console.log(`Grupo alvo: ${groupId}`);
+
+        // ------------------------------------------------------------
+        // PATCH DE COMPATIBILIDADE DE MEDIA (WA WEB SEPT/2026)
+        // ------------------------------------------------------------
+        // A atualização do WhatsApp Web de meados de setembro/2026 passou a
+        // anexar __x_id: undefined ao modelo interno de mídia (prepRawMedia).
+        // Quando a biblioteca constrói a mensagem, esse __x_id undefined
+        // sobrescreve o id da mensagem, causando o erro:
+        // "Data passed to getter must include an id property...".
+        // Este patch na página do Puppeteer remove esse __x_id/id residual.
+        if (client.pupPage) {
+            try {
+                await client.pupPage.evaluate(() => {
+                    if (window.WWebJS && window.WWebJS.processMedia) {
+                        const origProcessMedia = window.WWebJS.processMedia;
+                        window.WWebJS.processMedia = async function (...args) {
+                            const res = await origProcessMedia.apply(this, args);
+                            if (res && typeof res === 'object') {
+                                delete res.__x_id;
+                                delete res.id;
+                            }
+                            return res;
+                        };
+                    }
+                    if (window.Store && window.Store.MediaPrep) {
+                        const origPrepRawMedia = window.Store.MediaPrep.prepRawMedia;
+                        if (origPrepRawMedia) {
+                            window.Store.MediaPrep.prepRawMedia = async function (...args) {
+                                const res = await origPrepRawMedia.apply(this, args);
+                                if (res && typeof res === 'object') {
+                                    delete res.__x_id;
+                                    delete res.id;
+                                }
+                                return res;
+                            };
+                        }
+                    }
+                });
+                console.log('🔧 Patch de compatibilidade de media aplicado.');
+            } catch (patchErr) {
+                console.error('Aviso: falha ao aplicar patch de media (não-fatal):', patchErr.message || patchErr);
+            }
+        }
         // NOTE: intentionally NOT calling client.getChatById() here.
         // whatsapp-web.js currently has an active, unresolved bug where
         // getChatById crashes with a terse "r" error on the current
@@ -407,29 +450,29 @@ async function executarEnvio(client) {
                         await client.sendMessage(groupId, thumb, { caption: mensagemLimpa });
                         enviado = true;
                         console.log(`Mensagem única ${numero} enviada (miniatura do vídeo + título/texto/links na caption) — tentativa ${tentativa}.`);
-                    } else if (miniatura) {
-                        // FALLBACK: legenda curta na imagem e o texto numa
-                        // mensagem própria (usado quando o texto excede o
-                        // limite de caption ou a mensagem única falhou).
+                    } else if (miniatura && tentativa === 1) {
+                        // FALLBACK COM IMAGEM (tentativa 1): legenda curta na imagem
+                        // e o texto numa mensagem própria.
                         const thumb = new MessageMedia(miniatura.mime, miniatura.data, miniatura.filename);
                         const captionCurta = `🎬 Ver o vídeo da meditação:\nhttps://www.youtube.com/watch?v=${videoId}`;
                         await client.sendMessage(groupId, thumb, { caption: captionCurta });
-                        console.log(`🖼️ Miniatura da meditação ${numero} enviada com legenda curta (fallback).`);
+                        console.log(`🖼️ Miniatura da meditação ${numero} enviada com legenda curta.`);
                         await client.sendMessage(groupId, mensagemLimpa);
                         enviado = true;
                         console.log(`Mensagem ${numero} (texto) enviada a seguir à miniatura — tentativa ${tentativa}.`);
                     } else {
+                        // FALLBACK DE TEXTO PURO (tentativa 2 ou se sem miniatura):
+                        // garante o envio do conteúdo completo mesmo se a mídia falhar!
                         await client.sendMessage(groupId, mensagemLimpa);
                         enviado = true;
-                        console.log(`Mensagem ${numero} enviada (tentativa ${tentativa}) — chamada resolvida sem erro.`);
+                        console.log(`Mensagem ${numero} enviada como texto puro (tentativa ${tentativa}) — chamada resolvida sem erro.`);
                     }
                 } catch (err) {
                     ultimoErro = err.message || String(err);
                     console.error(`Falha ao enviar mensagem ${numero} (tentativa ${tentativa}):`, ultimoErro);
                     if (tentativa < 2) {
-                        if (miniatura && usaMensagemUnica) {
-                            console.log('A preparar o fallback em duas mensagens (imagem + texto) para a próxima tentativa...');
-                        }
+                        console.log('A descartar miniatura e a mudar para fallback de texto puro na tentativa 2...');
+                        miniatura = null;
                         console.log('A aguardar 15 segundos antes de tentar novamente...');
                         await new Promise(resolve => setTimeout(resolve, 15000));
                     }
