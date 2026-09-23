@@ -115,6 +115,7 @@ jobs:
           # sai sem enviar mensagens nem exigir whatsapp_msg.txt. Os passos
           # de compressão/upload abaixo guardam a nova sessão no artefacto.
           WHATSAPP_PAREAMENTO: ${{ inputs.pareamento == true && '1' || '0' }}
+          WEB_VERSION: '2.3000.1048249751-alpha'
         run: node send_whatsapp.js
 
       - name: Alerta de falha

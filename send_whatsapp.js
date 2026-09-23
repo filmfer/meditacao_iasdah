@@ -12,12 +12,36 @@ let finalizando = false;
 // a sessão era descartada e caducava a cada ~2 dias).
 const MARKER_SESSAO = './whatsapp_auth/.autenticado';
 
+// Versão actual do WhatsApp Web listada em https://wppconnect.io/whatsapp-versions.
+// Permite override via env Web_VERSION para actualizações sem push de código.
+const WEB_VERSION = process.env.WEB_VERSION || '2.3000.1048249751-alpha';
+
 function marcarSessaoAutenticada() {
     try {
         fs.mkdirSync('./whatsapp_auth', { recursive: true });
         fs.writeFileSync(MARKER_SESSAO, String(Date.now()));
     } catch (err) {
         console.error('Aviso: não foi possível escrever o marker de sessão:', err.message || err);
+    }
+}
+
+// ------------------------------------------------------------
+// LIMPEZA DE SESSÃO OBSOLETA
+// ------------------------------------------------------------
+// Quando a autenticação falha, os ficheiros da sessão anterior
+// (creds, dados do browser) sobrevivem ao client.destroy() e fazem
+// a tentativa seguinte crachar com "Target closed" / "Execution
+// context was destroyed" — o mesmo ciclo do run de 2026-09-06.
+// Apagar a pasta whatsapp_auth força um QR Code limpo na tentativa
+// seguinte, em vez de re-ler credenciais revogadas pelo WhatsApp.
+function clearSession() {
+    try {
+        if (fs.existsSync('./whatsapp_auth')) {
+            fs.rmSync('./whatsapp_auth', { recursive: true, force: true });
+            console.log('Sessão obsoleta removida (pasta whatsapp_auth apagada) — forçará novo QR Code.');
+        }
+    } catch (err) {
+        console.error('Aviso: não foi possível limpar a sessão:', err.message || err);
     }
 }
 
@@ -109,18 +133,19 @@ function criarCliente() {
             // do WhatsApp Web neste ambiente.
             protocolTimeout: 180000
         },
-        // webVersionCache pin RESTAURADO (2026-09-06): o WhatsApp passou a
+        // webVersionCache pin (actualizado 2026-09-23): o WhatsApp passou a
         // servir uma versão que o mecanismo default da biblioteca não consegue
         // carregar — o boot do WhatsApp Web fica suspenso antes de gerar QR
-        // ("Nem 'qr' nem 'ready' disparado em 90s"), exactamente a falha do
-        // run de 2026-09-06 20:03 UTC. O pin aponta para a versão CURRENT
-        // listada em https://wppconnect.io/whatsapp-versions (validade ~2
-        // meses: 2.3000.1046922887-alpha expira a 2026-11-06). Quando este
-        // erro voltar a aparecer, actualizar o remotePath para a nova versão
-        // current dessa página — nunca deixar um pin expirado no lugar.
+        // ("Nem 'qr' nem 'ready' disparado em 90s"). O pin aponta para a versão
+        // CURRENT listada em https://wppconnect.io/whatsapp-versions
+        // (2.3000.1048249751-alpha, disponível até ~2026-11-23).
+        // webVersion expõe o número da versão à biblioteca para seleccionar
+        // o código path correcto (threshold 2.3000.x).
+        // Actualiza WEB_VERSION quando expirar — nunca deixar um pin expirado.
+        webVersion: WEB_VERSION,
         webVersionCache: {
             type: 'remote',
-            remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1046922887-alpha.html'
+            remotePath: `https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/${WEB_VERSION}.html`
         }
     });
 }
@@ -232,9 +257,19 @@ function autenticar() {
                 } catch (err) {
                     console.error('Aviso: erro durante client.destroy() entre tentativas (não-fatal):', err.message || err);
                 }
+
+                // Limpa a sessão obsoleta antes de tentar de novo. Sem isto,
+                // a tentativa seguinte lê os mesmos creds revogados e cracha
+                // com "Target closed" / "Execution context was destroyed",
+                // esgotando as 3 tentativas sem nunca gerar um QR Code.
+                clearSession();
+
+                // Pequena pausa para libertação de handles do browser antigo
+                // (evita "Target closed" por processo zombie do Puppeteer).
+                await new Promise(resolve => setTimeout(resolve, 5000));
             }
 
-            console.error(`Abort: autenticação falhou após ${MAX_TENTATIVAS_INIT} tentativas de ${TEMPO_WATCHDOG_INIT / 1000}s. Provável incompatibilidade de versão do WhatsApp Web (actualizar o webVersionCache com a versão current de https://wppconnect.io/whatsapp-versions) ou falha de rede.`);
+            console.error(`Abort: autenticação falhou após ${MAX_TENTATIVAS_INIT} tentativas de ${TEMPO_WATCHDOG_INIT / 1000}s. Sessão obsoleta foi limpa em cada tentativa — a causa provável é incompatibilidade de versão do WhatsApp Web (actualizar WEB_VERSION/webVersionCache) ou falha de rede.`);
             process.exit(1);
         })();
     });

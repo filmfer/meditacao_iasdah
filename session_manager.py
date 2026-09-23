@@ -62,6 +62,14 @@ def restore():
     print('Sessao valida confirmada.')
     return 0
 
+def clear():
+    if SESSION_DIR.exists():
+        shutil.rmtree(SESSION_DIR)
+        print(f'Sessão obsoleta removida: {SESSION_DIR}')
+    else:
+        print('Nenhuma sessão para remover.')
+    return 0
+
 def compress():
     if not session_valida():
         print('ERRO: Sessao WhatsApp nao encontrada.')
@@ -80,10 +88,12 @@ def main():
     parser = argparse.ArgumentParser(description='Gestao da sessao WhatsApp')
     sub = parser.add_subparsers(dest='comando', required=True)
     sub.add_parser('clean', help='Limpar caches da sessao')
+    sub.add_parser('clear', help='Limpar e remover a pasta de sessao obsoleta')
     sub.add_parser('compress', help='Validar e compactar a sessao')
     sub.add_parser('restore', help='Restaurar sessao do artefacto')
     args = parser.parse_args()
     if args.comando == 'clean': return clean()
+    elif args.comando == 'clear': return clear()
     elif args.comando == 'compress': return compress()
     elif args.comando == 'restore': return restore()
     return 1
