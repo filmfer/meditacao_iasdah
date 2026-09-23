@@ -86,15 +86,7 @@ jobs:
       # O artefacto é guardado compactado (tar.gz) para reduzir o tamanho
       # de 600MB+ (caches do Chromium) para ~30-80MB.
       - name: Descompactar a sessão do WhatsApp
-        shell: bash
-        run: |
-          if [ -f whatsapp-session.tar.gz ]; then
-            tar xzf whatsapp-session.tar.gz
-            rm -f whatsapp-session.tar.gz
-            echo "Sessão descompactada com sucesso."
-          else
-            echo "Aviso: tarball não encontrado. Será necessário pareamento via QR Code (workflow_dispatch com pareamento=true)."
-          fi
+        run: python session_manager.py restore
 
       - name: Instalar dependências (Python & Node.js)
         run: |
@@ -141,53 +133,11 @@ jobs:
       # que mantém a sessão válida pelos 90 dias de retenção em vez de
       # caducar a cada ~2 dias. Se a autenticação falhou (QR não lido),
       # o marker não existe e o artefacto anterior fica intacto.
-      - name: Limpar caches desnecessárias da sessão
+      - name: Limpar e compactar a sessão do WhatsApp
         if: hashFiles('whatsapp_auth/.autenticado') != ''
-        shell: bash
         run: |
-          rm -f \
-            whatsapp_auth/session/SingletonSocket \
-            whatsapp_auth/session/SingletonLock \
-            whatsapp_auth/session/SingletonCookie
-          rm -rf \
-            whatsapp_auth/session/Default/Cache \
-            whatsapp_auth/session/Default/Code\ Cache \
-            whatsapp_auth/session/Default/GPUCache \
-            whatsapp_auth/session/Default/Service\ Worker/CacheStorage \
-            whatsapp_auth/session/Default/Service\ Worker/ScriptCache \
-            whatsapp_auth/session/Default/GrShaderCache \
-            whatsapp_auth/session/Default/DawnCache \
-            whatsapp_auth/session/Default/Dictionaries \
-            whatsapp_auth/session/Default/Crashpad \
-            whatsapp_auth/session/Default/component_crx_cache \
-            whatsapp_auth/session/Default/Storage/ext \
-            whatsapp_auth/session/Default/blob_storage \
-            whatsapp_auth/session/Default/File\ System
-          du -sh whatsapp_auth 2>/dev/null || echo "whatsapp_auth não existe"
-
-      - name: Comprimir sessão
-        if: hashFiles('whatsapp_auth/.autenticado') != ''
-        shell: bash
-        run: |
-          # A sessão LocalAuth vive no perfil Chromium em session/Default/
-          # (Local Storage/leveldb e IndexedDB) — a presença de qualquer uma
-          # das stores comprova autenticação real.
-          DEFAULT="whatsapp_auth/session/Default"
-          LVLDB="$DEFAULT/Local Storage/leveldb"
-          IDB="$DEFAULT/IndexedDB"
-
-          if { [ -d "$LVLDB" ] && [ -s "$LVLDB/CURRENT" ]; } || \
-             [ -n "$(find "$IDB" -type f 2>/dev/null | head -n1)" ]; then
-            tar czf whatsapp-session.tar.gz whatsapp_auth
-            ls -lh whatsapp-session.tar.gz
-            # Nunca `tar | head` sob pipefail: o SIGPIPE mata o tar mesmo
-            # com o tarball gerado.
-            tar tzf whatsapp-session.tar.gz 2>/dev/null | head -30 || true
-          else
-            echo "ERRO: Sessão não encontrada em session/Default/. A preservar o artefacto anterior."
-            find whatsapp_auth -maxdepth 3 2>/dev/null | head -60
-            exit 1
-          fi
+          python session_manager.py clean
+          python session_manager.py compress
 
       - name: Guardar sessão do WhatsApp
         uses: actions/upload-artifact@v4.4.0
