@@ -7,7 +7,7 @@ on:
     # mantendo a hora local constante o ano inteiro.
     # Minutos fora de hora de propósito: o scheduler do GitHub é best-effort
     # e minutos incomuns reduzem os atrasos dos slots saturados.
-    - cron: '17 6 * * *'
+    - cron: '17 4 * * *'
 
   workflow_dispatch:
     inputs:
