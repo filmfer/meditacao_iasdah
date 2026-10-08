@@ -18,8 +18,8 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-ALVO = (4, 23)          # 07:23 locais
-TETO_ESPERA_S = 5400    # 90 min
+ALVO = (5, 23)          # 07:23 locais
+TETO_ESPERA_S = 0 #5400    # 90 min
 TZ_ACORES = ZoneInfo("Atlantic/Azores")
 
 
