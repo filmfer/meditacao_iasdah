@@ -2,12 +2,13 @@ name: Publicar Meditação Diária no Telegram e WhatsApp
 
 on:
   schedule:
-    # Cron fixo em UTC: 06:23 UTC = 07:23 locais (Açores) no verão.
-    # No inverno o step "Esperar pelas 07:23" dorme 1h antes de publicar,
-    # mantendo a hora local constante o ano inteiro.
-    # Minutos fora de hora de propósito: o scheduler do GitHub é best-effort
+    # Hora fixa em UTC. Os Açores são UTC+1 no verão (AZOST) e UTC+0 no
+    # inverno (AZOT). O cron do GitHub só corre em UTC, por isso fixamos um
+    # único horário: 06:18 UTC = 07:18 locais no verão.
+    # (No inverno publica às 06:18 locais — sem ajuste de verão/inverno.)
+    # Minuto fora de hora de propósito: o scheduler do GitHub é best-effort
     # e minutos incomuns reduzem os atrasos dos slots saturados.
-    - cron: '17 5 * * *'
+    - cron: '18 6 * * *'
 
   workflow_dispatch:
     inputs:
@@ -38,16 +39,6 @@ jobs:
     steps:
       - name: Check out uma cópia do repositório
         uses: actions/checkout@v4
-
-      # ============================================================
-      # ALINHAR COM AS 07:23 NOS AÇORES
-      # ============================================================
-      # O cron é fixo em UTC (06:23) e os Açores alternam UTC+1 (verão) /
-      # UTC+0 (inverno). No inverno este step dorme 1h para publicar às
-      # 07:23 locais; no verão não espera. Teto de 90 min.
-      - name: Esperar pelas 07:23 locais (Açores)
-        if: github.event_name == 'schedule'
-        run: python workflow_steps.py
 
       # ============================================================
       # AMBIENTE
