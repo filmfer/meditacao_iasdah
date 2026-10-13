@@ -8,15 +8,15 @@ on:
     # (No inverno publica às 06:18 locais — sem ajuste de verão/inverno.)
     # Minuto fora de hora de propósito: o scheduler do GitHub é best-effort
     # e minutos incomuns reduzem os atrasos dos slots saturados.
-    - cron: '18 6 * * *'
+    - cron: '18 3 * * *'
 
-  workflow_dispatch:
-    inputs:
-      pareamento:
-        description: 'Modo pareamento: gera QR Code no log, guarda a nova sessão e NÃO publica (recupera a sessão quando o artefacto se perde/expira)'
-        type: boolean
-        required: false
-        default: false
+  #workflow_dispatch:
+  #  inputs:
+  #    pareamento:
+  #      description: 'Modo pareamento: gera QR Code no log, guarda a nova sessão e NÃO publica (recupera a sessão quando o artefacto se perde/expira)'
+  #      type: boolean
+  #      required: false
+  #      default: false
 
 # Mínimo necessário: ler metadados e descarregar o artefacto da sessão.
 # Nota: tokens de GitHub App passam ao formato stateless (ghs_... ~520
