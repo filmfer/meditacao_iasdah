@@ -2,7 +2,7 @@ name: Publicar Meditação Diária no Telegram e WhatsApp
 
 on:
   schedule:
-    - cron: '18 6 * * *'
+    - cron: '13 6 * * *'
 
   workflow_dispatch:
     inputs:
@@ -75,7 +75,10 @@ jobs:
       ############################################################
       # RESTAURAR SESSÃO
       ############################################################
-
+      - name: Verificar sessão válida
+        run: |
+          python session_manager.py health || true
+          
       - name: Restaurar sessão WhatsApp
         uses: dawidd6/action-download-artifact@v6
         with:
