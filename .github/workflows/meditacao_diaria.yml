@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       pareamento:
-        description: 'Executar apenas pareamento WhatsApp'
+        description: 'Gerar QR e atualizar sessão sem publicar'
         type: boolean
         required: false
         default: false
@@ -21,7 +21,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-
   build-and-send:
 
     runs-on: ubuntu-latest
@@ -30,6 +29,10 @@ jobs:
 
     steps:
 
+      ############################################################
+      # CHECKOUT
+      ############################################################
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -37,11 +40,13 @@ jobs:
         run: |
           echo "UTC:"
           date -u
-          echo "Local:"
+
+          echo ""
+          echo "Runner:"
           date
 
       ############################################################
-      # Ambiente
+      # AMBIENTE
       ############################################################
 
       - name: Configurar Python
@@ -62,7 +67,7 @@ jobs:
           sudo update-locale LANG=pt_PT.UTF-8
 
       ############################################################
-      # Sessão WhatsApp - Restauro
+      # RESTAURAR SESSÃO
       ############################################################
 
       - name: Restaurar sessão WhatsApp
@@ -70,40 +75,59 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: meditacao_diaria.yml
-          workflow_search: true
+          branch: main
           workflow_conclusion: success
+          workflow_search: true
           name: whatsapp-session
           path: .
           if_no_artifact_found: warn
 
-      - name: Diagnóstico do artefacto restaurado
+      - name: Diagnóstico do download
         run: |
           echo "=== Conteúdo atual ==="
           ls -lah
 
-          echo "=== Artefactos ==="
+          echo ""
+          echo "=== Artefactos encontrados ==="
           find . -name "*.tar.gz" || true
 
-      - name: Restaurar estrutura da sessão
+      - name: Restaurar sessão
         run: python session_manager.py restore
 
-      - name: Validar estado da sessão
-        run: python session_manager.py health
+      - name: Diagnóstico da sessão restaurada
+        run: |
+          echo "=== Sessão ==="
+
+          if [ -d whatsapp_auth ]; then
+            du -sh whatsapp_auth
+          else
+            echo "whatsapp_auth inexistente"
+          fi
+
+          echo ""
+          echo "=== Markers ==="
+          find whatsapp_auth -maxdepth 2 -type f 2>/dev/null | grep -E '\.(autenticado|ready|invalido)$' || true
+
+      - name: Health check da sessão
+        run: python session_manager.py health || true
 
       ############################################################
-      # Dependências
+      # DEPENDÊNCIAS
       ############################################################
 
       - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4 urllib3
+
+          pip install requests
+          pip install beautifulsoup4
+          pip install urllib3
 
           npm install whatsapp-web.js@1.34.7
           npm install qrcode-terminal
 
       ############################################################
-      # Telegram
+      # TELEGRAM
       ############################################################
 
       - name: Publicar Telegram
@@ -116,7 +140,7 @@ jobs:
         run: python meditacao_iasdah.py
 
       ############################################################
-      # WhatsApp
+      # WHATSAPP
       ############################################################
 
       - name: Enviar WhatsApp
@@ -127,7 +151,7 @@ jobs:
         run: node send_whatsapp.js
 
       ############################################################
-      # Alertas
+      # ALERTA DE FALHA
       ############################################################
 
       - name: Alerta de falha
@@ -138,23 +162,28 @@ jobs:
         run: python alert_failure.py
 
       ############################################################
-      # Persistência da sessão
+      # GUARDAR SESSÃO
       ############################################################
 
-      - name: Limpar caches
+      - name: Limpar caches da sessão
         if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
-        run: |
-          python session_manager.py clean
+        run: python session_manager.py clean
 
-      - name: Validar sessão antes de guardar
+      - name: Health check final
         if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
-        run: |
-          python session_manager.py health
+        run: python session_manager.py health || true
 
       - name: Compactar sessão
         if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
+        run: python session_manager.py compress
+
+      - name: Verificar tarball
+        if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
         run: |
-          python session_manager.py compress
+          test -f whatsapp-session.tar.gz
+
+          echo "=== Tarball ==="
+          ls -lh whatsapp-session.tar.gz
 
       - name: Guardar sessão WhatsApp
         uses: actions/upload-artifact@v4
@@ -166,11 +195,14 @@ jobs:
           overwrite: true
           include-hidden-files: true
 
-      - name: Mostrar conteúdo final da sessão
+      - name: Diagnóstico final
         if: always()
         run: |
-          echo "=== Pasta WhatsApp ==="
-          du -sh whatsapp_auth 2>/dev/null || true
+          echo "=== Artefactos locais ==="
 
-          echo "=== Artefactos ==="
-          ls -lah *.tar.gz 2>/dev/null || true
+          ls -lh *.tar.gz 2>/dev/null || true
+
+          echo ""
+          echo "=== Sessão ==="
+
+          du -sh whatsapp_auth 2>/dev/null || true
