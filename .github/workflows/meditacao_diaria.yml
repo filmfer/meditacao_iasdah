@@ -2,13 +2,12 @@ name: Publicar Meditação Diária no Telegram e WhatsApp
 
 on:
   schedule:
-    # 06:18 UTC
     - cron: '18 6 * * *'
 
   workflow_dispatch:
     inputs:
       pareamento:
-        description: 'Gerar QR e atualizar sessão sem publicar'
+        description: 'Executar apenas pareamento WhatsApp'
         type: boolean
         required: false
         default: false
@@ -22,6 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+
   build-and-send:
 
     runs-on: ubuntu-latest
@@ -33,13 +33,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Mostrar hora UTC
+      - name: Mostrar hora do runner
         run: |
           echo "UTC:"
           date -u
+          echo "Local:"
+          date
 
       ############################################################
-      # PYTHON + NODE
+      # Ambiente
       ############################################################
 
       - name: Configurar Python
@@ -47,65 +49,61 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Configurar Node
+      - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Locale pt_PT
+      - name: Instalar locale pt_PT
         run: |
           sudo apt-get update
           sudo apt-get install -y language-pack-pt
           sudo locale-gen pt_PT.UTF-8
+          sudo update-locale LANG=pt_PT.UTF-8
 
       ############################################################
-      # RESTAURAR SESSÃO
+      # Sessão WhatsApp - Restauro
       ############################################################
 
-      - name: Restaurar artefacto da sessão
+      - name: Restaurar sessão WhatsApp
         uses: dawidd6/action-download-artifact@v6
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: meditacao_diaria.yml
+          workflow_search: true
+          workflow_conclusion: success
           name: whatsapp-session
           path: .
           if_no_artifact_found: warn
 
-      - name: Diagnóstico do artefacto
+      - name: Diagnóstico do artefacto restaurado
         run: |
-          echo "=== Diretório atual ==="
+          echo "=== Conteúdo atual ==="
           ls -lah
 
-          echo "=== Tarballs ==="
+          echo "=== Artefactos ==="
           find . -name "*.tar.gz" || true
 
-      - name: Restaurar sessão
+      - name: Restaurar estrutura da sessão
         run: python session_manager.py restore
 
-      - name: Verificar sessão restaurada
-        run: |
-          du -sh whatsapp_auth 2>/dev/null || true
-          find whatsapp_auth -name CURRENT 2>/dev/null | head || true
+      - name: Validar estado da sessão
+        run: python session_manager.py health
 
       ############################################################
-      # DEPENDÊNCIAS
+      # Dependências
       ############################################################
 
       - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 urllib3
-          npm install whatsapp-web.js@1.34.7 qrcode-terminal
+
+          npm install whatsapp-web.js@1.34.7
+          npm install qrcode-terminal
 
       ############################################################
-      # HEALTH CHECK
-      ############################################################
-
-      - name: Health check da sessão
-        run: python session_manager.py health
-
-      ############################################################
-      # TELEGRAM
+      # Telegram
       ############################################################
 
       - name: Publicar Telegram
@@ -118,10 +116,10 @@ jobs:
         run: python meditacao_iasdah.py
 
       ############################################################
-      # WHATSAPP
+      # WhatsApp
       ############################################################
 
-      - name: Publicar WhatsApp
+      - name: Enviar WhatsApp
         id: whatsapp
         env:
           WHATSAPP_GROUP_ID: ${{ secrets.WHATSAPP_GROUP_ID }}
@@ -129,7 +127,7 @@ jobs:
         run: node send_whatsapp.js
 
       ############################################################
-      # ALERTA DE ERRO
+      # Alertas
       ############################################################
 
       - name: Alerta de falha
@@ -140,18 +138,25 @@ jobs:
         run: python alert_failure.py
 
       ############################################################
-      # GUARDAR SESSÃO
+      # Persistência da sessão
       ############################################################
 
-      - name: Limpar sessão
+      - name: Limpar caches
         if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
-        run: python session_manager.py clean
+        run: |
+          python session_manager.py clean
+
+      - name: Validar sessão antes de guardar
+        if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
+        run: |
+          python session_manager.py health
 
       - name: Compactar sessão
         if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
-        run: python session_manager.py compress
+        run: |
+          python session_manager.py compress
 
-      - name: Guardar artefacto
+      - name: Guardar sessão WhatsApp
         uses: actions/upload-artifact@v4
         if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
         with:
@@ -160,3 +165,12 @@ jobs:
           retention-days: 90
           overwrite: true
           include-hidden-files: true
+
+      - name: Mostrar conteúdo final da sessão
+        if: always()
+        run: |
+          echo "=== Pasta WhatsApp ==="
+          du -sh whatsapp_auth 2>/dev/null || true
+
+          echo "=== Artefactos ==="
+          ls -lah *.tar.gz 2>/dev/null || true
