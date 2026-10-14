@@ -13,8 +13,9 @@ on:
         default: false
 
 permissions:
-  contents: read
   actions: read
+  contents: read
+  checks: read
 
 concurrency:
   group: meditacao-diaria
@@ -22,7 +23,12 @@ concurrency:
 
 jobs:
   build-and-send:
-
+  
+    permissions:
+      actions: read
+      contents: read
+      checks: read
+      
     runs-on: ubuntu-latest
 
     timeout-minutes: 20
@@ -76,11 +82,18 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           workflow: meditacao_diaria.yml
           branch: main
-          workflow_conclusion: success
           workflow_search: true
+          workflow_conclusion: success
           name: whatsapp-session
           path: .
           if_no_artifact_found: warn
+
+      - name: Mostrar contexto GitHub
+        run: |
+          echo "Workflow: $GITHUB_WORKFLOW"
+          echo "Ref: $GITHUB_REF"
+          echo "Branch: $GITHUB_REF_NAME"
+          echo "Run ID: $GITHUB_RUN_ID"
 
       - name: Diagnóstico do download
         run: |
