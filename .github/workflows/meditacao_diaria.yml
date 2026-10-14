@@ -8,7 +8,7 @@ on:
     # (No inverno publica às 06:18 locais — sem ajuste de verão/inverno.)
     # Minuto fora de hora de propósito: o scheduler do GitHub é best-effort
     # e minutos incomuns reduzem os atrasos dos slots saturados.
-    - cron: '18 3 * * *'
+    - cron: '18 2 * * *'
 
   #workflow_dispatch:
   #  inputs:
