@@ -2,15 +2,13 @@ name: Publicar Meditação Diária no Telegram e WhatsApp
 
 on:
   schedule:
-    # Hora fixa em UTC.
-    # 06:18 UTC = 07:18 locais nos Açores durante o horário de verão.
-    # No inverno corresponderá a 06:18 locais.
+    # 06:18 UTC
     - cron: '18 6 * * *'
 
   workflow_dispatch:
     inputs:
       pareamento:
-        description: 'Modo pareamento: gera QR Code no log, guarda a nova sessão e NÃO publica'
+        description: 'Gerar QR e atualizar sessão sem publicar'
         type: boolean
         required: false
         default: false
@@ -25,50 +23,46 @@ concurrency:
 
 jobs:
   build-and-send:
+
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+
+    timeout-minutes: 20
 
     steps:
-      - name: Check out uma cópia do repositório
+
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # ============================================================
-      # DIAGNÓSTICO
-      # ============================================================
-
-      - name: Mostrar hora do runner
+      - name: Mostrar hora UTC
         run: |
           echo "UTC:"
           date -u
-          echo "Local do runner:"
-          date
 
-      # ============================================================
-      # AMBIENTE
-      # ============================================================
+      ############################################################
+      # PYTHON + NODE
+      ############################################################
 
-      - name: Configurar o Python
+      - name: Configurar Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Configurar o Node.js
+      - name: Configurar Node
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: Instalar o locale pt_PT
+      - name: Locale pt_PT
         run: |
           sudo apt-get update
           sudo apt-get install -y language-pack-pt
           sudo locale-gen pt_PT.UTF-8
-          sudo update-locale LANG=pt_PT.UTF-8
 
-      # ============================================================
-      # SESSÃO WHATSAPP: RESTAURAR
-      # ============================================================
+      ############################################################
+      # RESTAURAR SESSÃO
+      ############################################################
 
-      - name: Restaurar a sessão do WhatsApp
+      - name: Restaurar artefacto da sessão
         uses: dawidd6/action-download-artifact@v6
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -77,20 +71,44 @@ jobs:
           path: .
           if_no_artifact_found: warn
 
-      - name: Descompactar a sessão do WhatsApp
+      - name: Diagnóstico do artefacto
+        run: |
+          echo "=== Diretório atual ==="
+          ls -lah
+
+          echo "=== Tarballs ==="
+          find . -name "*.tar.gz" || true
+
+      - name: Restaurar sessão
         run: python session_manager.py restore
 
-      - name: Instalar dependências (Python & Node.js)
+      - name: Verificar sessão restaurada
+        run: |
+          du -sh whatsapp_auth 2>/dev/null || true
+          find whatsapp_auth -name CURRENT 2>/dev/null | head || true
+
+      ############################################################
+      # DEPENDÊNCIAS
+      ############################################################
+
+      - name: Instalar dependências
         run: |
           python -m pip install --upgrade pip
           pip install requests beautifulsoup4 urllib3
           npm install whatsapp-web.js@1.34.7 qrcode-terminal
 
-      # ============================================================
-      # PUBLICAÇÕES
-      # ============================================================
+      ############################################################
+      # HEALTH CHECK
+      ############################################################
 
-      - name: Publicar no Telegram (Scraping & envio)
+      - name: Health check da sessão
+        run: python session_manager.py health
+
+      ############################################################
+      # TELEGRAM
+      ############################################################
+
+      - name: Publicar Telegram
         if: ${{ !inputs.pareamento }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -99,13 +117,20 @@ jobs:
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: python meditacao_iasdah.py
 
-      - name: Enviar para o WhatsApp
+      ############################################################
+      # WHATSAPP
+      ############################################################
+
+      - name: Publicar WhatsApp
         id: whatsapp
         env:
           WHATSAPP_GROUP_ID: ${{ secrets.WHATSAPP_GROUP_ID }}
           WHATSAPP_PAREAMENTO: ${{ inputs.pareamento && '1' || '0' }}
-          WEB_VERSION: '2.3000.1048249751-alpha'
         run: node send_whatsapp.js
+
+      ############################################################
+      # ALERTA DE ERRO
+      ############################################################
 
       - name: Alerta de falha
         if: failure()
@@ -114,18 +139,20 @@ jobs:
           TELEGRAM_PERSONAL_CHAT_ID: ${{ secrets.TELEGRAM_PERSONAL_CHAT_ID }}
         run: python alert_failure.py
 
-      # ============================================================
-      # SESSÃO WHATSAPP: GUARDAR
-      # ============================================================
+      ############################################################
+      # GUARDAR SESSÃO
+      ############################################################
 
-      - name: Limpar e compactar a sessão do WhatsApp
+      - name: Limpar sessão
         if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
-        run: |
-          python session_manager.py clean
-          python session_manager.py compress
+        run: python session_manager.py clean
 
-      - name: Guardar sessão do WhatsApp
-        uses: actions/upload-artifact@v4.4.0
+      - name: Compactar sessão
+        if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
+        run: python session_manager.py compress
+
+      - name: Guardar artefacto
+        uses: actions/upload-artifact@v4
         if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
         with:
           name: whatsapp-session
