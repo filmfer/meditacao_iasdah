@@ -185,11 +185,20 @@ def health():
 def restore():
 
     if not ARTEFACTO.exists():
+
         print(
-            "Aviso: tarball não encontrado. "
-            "Será necessário pareamento via QR Code."
+            "Aviso: artefacto whatsapp-session não encontrado."
         )
-        return 0
+
+        if SESSION_DIR.exists():
+            shutil.rmtree(SESSION_DIR)
+
+        print(
+            "Sessão local removida. "
+            "Será necessário novo pareamento."
+        )
+
+    return 0
 
     with tarfile.open(ARTEFACTO, "r:gz") as tar:
         tar.extractall(path=".")
