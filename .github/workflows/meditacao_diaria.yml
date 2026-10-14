@@ -2,31 +2,23 @@ name: Publicar Meditação Diária no Telegram e WhatsApp
 
 on:
   schedule:
-    # Hora fixa em UTC. Os Açores são UTC+1 no verão (AZOST) e UTC+0 no
-    # inverno (AZOT). O cron do GitHub só corre em UTC, por isso fixamos um
-    # único horário: 06:18 UTC = 07:18 locais no verão.
-    # (No inverno publica às 06:18 locais — sem ajuste de verão/inverno.)
-    # Minuto fora de hora de propósito: o scheduler do GitHub é best-effort
-    # e minutos incomuns reduzem os atrasos dos slots saturados.
-    - cron: '18 2 * * *'
+    # Hora fixa em UTC.
+    # 06:18 UTC = 07:18 locais nos Açores durante o horário de verão.
+    # No inverno corresponderá a 06:18 locais.
+    - cron: '18 6 * * *'
 
-  #workflow_dispatch:
-  #  inputs:
-  #    pareamento:
-  #      description: 'Modo pareamento: gera QR Code no log, guarda a nova sessão e NÃO publica (recupera a sessão quando o artefacto se perde/expira)'
-  #      type: boolean
-  #      required: false
-  #      default: false
+  workflow_dispatch:
+    inputs:
+      pareamento:
+        description: 'Modo pareamento: gera QR Code no log, guarda a nova sessão e NÃO publica'
+        type: boolean
+        required: false
+        default: false
 
-# Mínimo necessário: ler metadados e descarregar o artefacto da sessão.
-# Nota: tokens de GitHub App passam ao formato stateless (ghs_... ~520
-# chars) — nenhum passo valida formato ou comprimento de token; o token é
-# sempre injetado via secret no header Authorization das actions oficiais.
 permissions:
   contents: read
   actions: read
 
-# Um run de cada vez; nunca duas publicações em paralelo.
 concurrency:
   group: meditacao-diaria
   cancel-in-progress: false
@@ -39,6 +31,17 @@ jobs:
     steps:
       - name: Check out uma cópia do repositório
         uses: actions/checkout@v4
+
+      # ============================================================
+      # DIAGNÓSTICO
+      # ============================================================
+
+      - name: Mostrar hora do runner
+        run: |
+          echo "UTC:"
+          date -u
+          echo "Local do runner:"
+          date
 
       # ============================================================
       # AMBIENTE
@@ -74,8 +77,6 @@ jobs:
           path: .
           if_no_artifact_found: warn
 
-      # O artefacto é guardado compactado (tar.gz) para reduzir o tamanho
-      # de 600MB+ (caches do Chromium) para ~30-80MB.
       - name: Descompactar a sessão do WhatsApp
         run: python session_manager.py restore
 
@@ -90,7 +91,7 @@ jobs:
       # ============================================================
 
       - name: Publicar no Telegram (Scraping & envio)
-        if: inputs.pareamento != true
+        if: ${{ !inputs.pareamento }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -102,10 +103,7 @@ jobs:
         id: whatsapp
         env:
           WHATSAPP_GROUP_ID: ${{ secrets.WHATSAPP_GROUP_ID }}
-          # Em modo pareamento: autentica via QR, persiste ./whatsapp_auth e
-          # sai sem enviar mensagens nem exigir whatsapp_msg.txt. Os passos
-          # de compressão/upload abaixo guardam a nova sessão no artefacto.
-          WHATSAPP_PAREAMENTO: ${{ inputs.pareamento == true && '1' || '0' }}
+          WHATSAPP_PAREAMENTO: ${{ inputs.pareamento && '1' || '0' }}
           WEB_VERSION: '2.3000.1048249751-alpha'
         run: node send_whatsapp.js
 
@@ -117,23 +115,18 @@ jobs:
         run: python alert_failure.py
 
       # ============================================================
-      # SESSÃO WHATSAPP: GUARDAR (SÓ SE AUTENTICADA)
+      # SESSÃO WHATSAPP: GUARDAR
       # ============================================================
-      # Condicionado ao marker .autenticado (escrito pelo send_whatsapp.js
-      # no evento 'ready'), NÃO ao sucesso do envio: a sessão fresca é
-      # preservada mesmo que o envio falhe depois da autenticação — é isso
-      # que mantém a sessão válida pelos 90 dias de retenção em vez de
-      # caducar a cada ~2 dias. Se a autenticação falhou (QR não lido),
-      # o marker não existe e o artefacto anterior fica intacto.
+
       - name: Limpar e compactar a sessão do WhatsApp
-        if: hashFiles('whatsapp_auth/.autenticado') != ''
+        if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
         run: |
           python session_manager.py clean
           python session_manager.py compress
 
       - name: Guardar sessão do WhatsApp
         uses: actions/upload-artifact@v4.4.0
-        if: hashFiles('whatsapp_auth/.autenticado') != ''
+        if: ${{ hashFiles('whatsapp_auth/.autenticado') != '' }}
         with:
           name: whatsapp-session
           path: whatsapp-session.tar.gz
