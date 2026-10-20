@@ -1,5 +1,7 @@
 const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const fs = require('fs');
+const https = require('https');
+const QRCode = require('qrcode');
 
 // Flag de encerramento controlado: quando true, o handler 'disconnected'
 // não deve interpretar o fecho intencional (client.destroy()) como falha.
@@ -109,6 +111,90 @@ const MOTIVACOES = [
     '☀️🙏 As meditações de hoje já estão no grupo!\n\n📚 Um pouquinho da Palavra de manhã transforma o dia inteiro. Não te esqueças da leitura de hoje! 📖✨\n\nTenha um ótimo dia! 💛',
     '🌱💛 Três meditações, três oportunidades de crescer hoje!\n\n✝️ Completa o dia com a leitura diária — os pequenos momentos com Deus fazem toda a diferença. 📖🔥\n\nUm dia abençoado para todos! ☀️'
 ];
+
+// ------------------------------------------------------------
+// ENVIO DE QR CODE PARA O TELEGRAM (visualização no telemóvel)
+// ------------------------------------------------------------
+// Quando o WhatsApp gera um QR Code (pareamento ou sessão expirada),
+// o texto ASCII do terminal não cabe no ecrã do telemóvel ao ver os
+// logs do GitHub Actions. Esta função gera o QR como imagem PNG e
+// envia via Bot API para o chat do Telegram, para que possa ser
+// escaneado diretamente de uma foto.
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
+function enviarQrParaTelegram(qrDataUrl) {
+    return new Promise((resolve) => {
+        if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_CHAT_ID) {
+            console.log('ℹ️  TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID não definidos; QR Code não enviado para o Telegram.');
+            resolve();
+            return;
+        }
+
+        // Extrair dados base64 do data URL (formato: data:image/png;base64,....)
+        const match = qrDataUrl.match(/^data:image\/png;base64,(.*)$/);
+        if (!match) {
+            console.error('⚠️  Não foi possível extrair dados base64 do QR Code.');
+            resolve();
+            return;
+        }
+
+        const base64Data = match[1];
+        const boundary = '----TelegramQrBoundary' + Date.now();
+
+        const bodyParts = [];
+        bodyParts.push(`--${boundary}`);
+        bodyParts.push(`Content-Disposition: form-data; name="chat_id"`);
+        bodyParts.push('');
+        bodyParts.push(TELEGRAM_CHAT_ID);
+        bodyParts.push(`--${boundary}`);
+        bodyParts.push(`Content-Disposition: form-data; name="photo"; filename="qr_code.png"`);
+        bodyParts.push('Content-Type: image/png');
+        bodyParts.push('');
+        bodyParts.push(base64Data);
+        bodyParts.push(`--${boundary}--`);
+        bodyParts.push('');
+
+        const body = bodyParts.join('\r\n');
+
+        const options = {
+            hostname: 'api.telegram.org',
+            port: 443,
+            path: `/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`,
+            method: 'POST',
+            headers: {
+                'Content-Type': `multipart/form-data; boundary=${boundary}`,
+                'Content-Length': Buffer.byteLength(body)
+            }
+        };
+
+        const req = https.request(options, (res) => {
+            let data = '';
+            res.on('data', (chunk) => data += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    if (json.ok) {
+                        console.log('✅ QR Code enviado para o Telegram (imagem).');
+                    } else {
+                        console.error('⚠️  Telegram rejeitou o envio do QR Code:', json.description || data);
+                    }
+                } catch (e) {
+                    console.error('⚠️  Resposta inesperada do Telegram ao enviar QR Code:', data);
+                }
+                resolve();
+            });
+        });
+
+        req.on('error', (err) => {
+            console.error('⚠️  Falha ao enviar QR Code para o Telegram:', err.message || err);
+            resolve();
+        });
+
+        req.write(body);
+        req.end();
+    });
+}
 
 // ------------------------------------------------------------
 // MINIATURA DO YOUTUBE
@@ -229,7 +315,7 @@ function autenticar() {
                 const resultado = await new Promise((resolve) => {
                     const watchdog = setTimeout(() => resolve('timeout'), TEMPO_WATCHDOG_INIT);
 
-                    client.on('qr', (qr) => {
+                    client.on('qr', async (qr) => {
                         clearTimeout(watchdog);
                         if (qrTimeout) clearTimeout(qrTimeout); // não acumular timers se o 'qr' refrescar
                         if (MODO_PAREAMENTO) {
@@ -239,6 +325,16 @@ function autenticar() {
                             console.error('AVISO: Sessão expirou. Novo QR Code gerado.');
                         }
                         require('qrcode-terminal').generate(qr, { small: true, inverse: true });
+
+                        // Gerar QR Code como imagem PNG e enviar para o Telegram
+                        // (não bloqueia o fluxo: se falhar, o QR ainda está no terminal).
+                        try {
+                            const qrDataUrl = await QRCode.toDataURL(qr, { type: 'png', scale: 8 });
+                            console.log('📷 A enviar QR Code como imagem para o Telegram...');
+                            await enviarQrParaTelegram(qrDataUrl);
+                        } catch (err) {
+                            console.error('⚠️  Falha ao gerar/enviar QR Code para o Telegram:', err.message || err);
+                        }
 
                         // Janela realista para abrir o log + WhatsApp no telemóvel
                         // e scanear (5 minutos, cobrindo o lag de streaming do log).
