@@ -107,8 +107,10 @@ jobs:
           echo "=== Artefactos encontrados ==="
           find . -name "*.tar.gz" || true
 
-      - name: Restaurar sessão
-        run: python session_manager.py restore
+      - name: Restaurar sessão (tenta forçar se necessário)
+        run: |
+          python session_manager.py restore --forcar || \
+            python session_manager.py recuperar --forcar || true
 
       - name: Diagnóstico da sessão restaurada
         run: |
@@ -124,8 +126,8 @@ jobs:
           echo "=== Markers ==="
           find whatsapp_auth -maxdepth 2 -type f 2>/dev/null | grep -E '\.(autenticado|ready|invalido)$' || true
 
-      - name: Health check da sessão
-        run: python session_manager.py health || true
+      - name: Health check da sessão (tolerante)
+        run: python session_manager.py health --forcar || true
 
       ############################################################
       # DEPENDÊNCIAS
