@@ -8,13 +8,15 @@ from bs4 import BeautifulSoup
 import datetime
 import warnings
 from urllib3.exceptions import InsecureRequestWarning
+from urllib.parse import urljoin
 
 # --- CONFIGURAÇÕES ---
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 20
 EMAIL_RECEIVER = "filmfer@gmail.com"
-# Limpa o ficheiro do WhatsApp a cada nova execução diária
-open("whatsapp_msg.txt", "w", encoding="utf-8").close()
+# O ficheiro whatsapp_msg.txt é limpo apenas quando todas as 3 meditações
+# são processadas com sucesso (no final do script), para evitar perder
+# conteúdo de execuções anteriores em caso de falha parcial.
 
 # Suprime avisos de SSL explícitamente
 warnings.filterwarnings("ignore", category=InsecureRequestWarning)
@@ -65,6 +67,47 @@ def clean_scraped_text(text: str) -> str:
     text = text.replace(" \\", "")
     return text
 
+# Seletores alternativos para o link da meditação (em caso de mudança no website)
+LINK_SELECTORS = [
+    "a.mdl-button.mdl-button--colored.mdl-js-button.mdl-js-ripple-effect",
+    "a.mdl-button--colored",
+    "a[href*='post_type=meditacao']",
+]
+
+# Marcadores que indicam que a extração falhou (placeholders)
+PLACEHOLDER_TEXTOS = [
+    "título não encontrado",
+    "verso não encontrado",
+    "conteúdo não encontrado",
+]
+
+
+def _encontrar_link_meditacao(soup, base_url):
+    """Tenta múltiplos seletores para encontrar o link da meditação diária."""
+    for selector in LINK_SELECTORS:
+        tag = soup.select_one(selector)
+        if tag and tag.has_attr("href"):
+            href = tag["href"]
+            # Garantir URL absoluta
+            if href.startswith("http"):
+                return href
+            return urljoin(base_url, href)
+    return None
+
+
+def _conteudo_valido(texto, campo_nome):
+    """Verifica se o texto extraído não é vazio nem um placeholder de falha."""
+    if not texto or not texto.strip():
+        print(f"  [AVISO] {campo_nome} está vazio.")
+        return False
+    texto_lower = texto.strip().lower()
+    for ph in PLACEHOLDER_TEXTOS:
+        if ph in texto_lower:
+            print(f"  [AVISO] {campo_nome} parece ser um placeholder de falha: '{texto.strip()[:60]}...'")
+            return False
+    return True
+
+
 def scrape_meditation(base_url, meditacao_matinal_title):
     """Faz o scraping e retorna DUAS versões do texto formatado (Telegram e
     WhatsApp) mais o URL de pré-visualização (thumbnail) para o Telegram."""
@@ -73,11 +116,12 @@ def scrape_meditation(base_url, meditacao_matinal_title):
         response.raise_for_status()
         soup = BeautifulSoup(response.content, "html.parser")
 
-        link_tag = soup.find("a", class_="mdl-button mdl-button--colored mdl-js-button mdl-js-ripple-effect")
-        if not link_tag or not link_tag.has_attr("href"):
-            return None, None, "Link da meditação diária não encontrado"
+        meditation_url = _encontrar_link_meditacao(soup, base_url)
+        if not meditation_url:
+            return None, None, None, "Link da meditação diária não encontrado (nenhum seletor bateu)"
 
-        meditation_url = link_tag["href"]
+        print(f"  [INFO] URL da meditação: {meditation_url}")
+
         response = requests.get(meditation_url, verify=False, timeout=15)
         response.raise_for_status()
         soup = BeautifulSoup(response.content, "html.parser")
@@ -86,16 +130,26 @@ def scrape_meditation(base_url, meditacao_matinal_title):
         weekday_date = format_date_in_portuguese(today)
 
         title_tag = soup.find("div", class_="mdl-typography--headline")
-        title = clean_scraped_text(title_tag.text.strip() if title_tag else "Título não encontrado")
+        title = clean_scraped_text(title_tag.text.strip() if title_tag else "")
+        if not _conteudo_valido(title, "Título"):
+            return None, None, None, "Título da meditação não encontrado ou inválido"
 
         reference_text_tag = soup.find("div", class_="descriptionText versoBiblico")
-        reference_text = clean_scraped_text(reference_text_tag.text.strip() if reference_text_tag else "Verso não encontrado")
+        reference_text = clean_scraped_text(reference_text_tag.text.strip() if reference_text_tag else "")
+        if not _conteudo_valido(reference_text, "Verso bíblico"):
+            return None, None, None, "Verso bíblico não encontrado ou inválido"
 
         meditation_content_tag = soup.find("div", class_="conteudoMeditacao")
-        meditation_content = clean_scraped_text(meditation_content_tag.text.strip() if meditation_content_tag else "Conteúdo não encontrado")
+        meditation_content = clean_scraped_text(meditation_content_tag.text.strip() if meditation_content_tag else "")
+        if not _conteudo_valido(meditation_content, "Conteúdo da meditação"):
+            return None, None, None, "Conteúdo da meditação não encontrado ou inválido"
 
         youtube_iframe_tag = soup.find("iframe", {"src": lambda src: src and "youtube.com/embed" in src})
         youtube_link = youtube_iframe_tag["src"].split('?')[0].replace("embed/", "watch?v=") if youtube_iframe_tag else ""
+
+        print(f"  [OK] Título extraído: {title[:80]}...")
+        print(f"  [OK] Conteúdo: {len(meditation_content)} caracteres")
+        print(f"  [OK] YouTube: {youtube_link if youtube_link else 'sem vídeo'}")
 
         # --- VERSÃO TELEGRAM (Com escapes pesados MarkdownV2) ---
         telegram_text = (
@@ -121,8 +175,6 @@ def scrape_meditation(base_url, meditacao_matinal_title):
 
         # URL para forçar a pré-visualização (thumbnail) no Telegram: o do
         # vídeo do YouTube, se existir; caso contrário, o da própria meditação.
-        # Passado à API via link_preview_options, não depende de o URL estar
-        # reconhecível no texto (que vai escapado para MarkdownV2).
         preview_url = youtube_link if youtube_link else meditation_url
 
         return telegram_text.strip(), whatsapp_text.strip(), preview_url, None
@@ -178,66 +230,95 @@ if __name__ == "__main__":
             ("https://mais.cpb.com.br/meditacao-jovem/", "Meditação Jovem")
         ]
 
-        # Limpa o arquivo de mensagens acumuladas do WhatsApp se ele já existir de runs anteriores
-        if os.path.exists("whatsapp_msg.txt"):
-            os.remove("whatsapp_msg.txt")
+        resultados = []
 
         for url, title in meditation_sources:
-            print(f"\n--- Processando: {title} ---")
-            
+            print("\n" + "="*60)
+            print("--- Processando: " + title + " ---")
+            print("="*60)
+
             telegram_content = None
             whatsapp_content = None
             telegram_preview_url = None
             last_scrape_error = ""
-              
+            scraping_ok = False
+            telegram_ok = False
+            whatsapp_ok = False
+
             for attempt in range(1, MAX_RETRIES + 1):
-                print(f"Tentativa de scraping nº {attempt}/{MAX_RETRIES} para '{title}'...")
+                print("Tentativa de scraping nº " + str(attempt) + "/" + str(MAX_RETRIES) + " para '" + title + "'...")
                 t_content, w_content, t_preview, error = scrape_meditation(url, title)
                 if t_content and w_content:
                     telegram_content = t_content
                     whatsapp_content = w_content
                     telegram_preview_url = t_preview
+                    scraping_ok = True
                     print("Scraping bem-sucedido.")
                     break
                 last_scrape_error = error
-                print(f"Falha no scraping: {error}. A aguardar {RETRY_DELAY_SECONDS}s para tentar de novo.")
+                print("Falha no scraping: " + error + ". A aguardar " + str(RETRY_DELAY_SECONDS) + "s para tentar de novo.")
                 time.sleep(RETRY_DELAY_SECONDS)
-            
-            if not telegram_content:
-                print(f"ERRO FINAL: Scraping para '{title}' falhou após {MAX_RETRIES} tentativas.")
+
+            if not scraping_ok:
+                print("ERRO FINAL: Scraping para '" + title + "' falhou após " + str(MAX_RETRIES) + " tentativas.")
                 send_error_email(
-                    f"Falha no Scraping da Meditação: {title}",
-                    f"O bot não conseguiu extrair o conteúdo para a meditação '{title}'.\n\nÚltimo erro registado:\n{last_scrape_error}"
+                    "Falha no Scraping da Meditação: " + title,
+                    "O bot não conseguiu extrair o conteúdo para a meditação '" + title + "'.\n\nÚltimo erro registado:\n" + last_scrape_error
                 )
+                resultados.append((title, False, False, False))
                 continue
 
             # --- ENVIO TELEGRAM ---
-            send_success = False
             last_send_error = ""
             for attempt in range(1, MAX_RETRIES + 1):
-                print(f"Tentativa de envio para o Telegram nº {attempt}/{MAX_RETRIES} para '{title}'...")
+                print("Tentativa de envio para o Telegram nº " + str(attempt) + "/" + str(MAX_RETRIES) + " para '" + title + "'...")
                 success, error = send_telegram_message(telegram_content, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, telegram_preview_url)
                 if success:
-                    send_success = True
+                    telegram_ok = True
                     break
                 last_send_error = error
-                print(f"Falha no envio Telegram: {error}. A aguardar {RETRY_DELAY_SECONDS}s para tentar de novo.")
+                print("Falha no envio Telegram: " + error + ". A aguardar " + str(RETRY_DELAY_SECONDS) + "s para tentar de novo.")
                 time.sleep(RETRY_DELAY_SECONDS)
 
-            if not send_success:
-                print(f"ERRO FINAL: Envio para o Telegram para '{title}' falhou.")
+            if not telegram_ok:
+                print("ERRO FINAL: Envio para o Telegram para '" + title + "' falhou.")
                 send_error_email(
-                    f"Falha no Envio para o Telegram: {title}",
-                    f"O bot não conseguiu enviar a meditação '{title}' para o Telegram.\n\nÚltimo erro registado:\n{last_send_error}"
+                    "Falha no Envio para o Telegram: " + title,
+                    "O bot não conseguiu enviar a meditação '" + title + "' para o Telegram.\n\nÚltimo erro registado:\n" + last_send_error
                 )
 
             # --- SALVAR PAYLOAD DO WHATSAPP ---
-            # BUGFIX: usar whatsapp_content (texto limpo, sem escapes MarkdownV2),
-            # não telegram_content. Estavas a escrever a versão escapada do
-            # Telegram (\*, \_, \., \-, \! etc.) no ficheiro que o send_whatsapp.js
-            # lê e envia praticamente verbatim — por isso apareciam barras
-            # invertidas literais nas mensagens do WhatsApp.
+            whatsapp_ok = True
             with open("whatsapp_msg.txt", "a", encoding="utf-8") as f:
                 f.write(whatsapp_content + "\n\n===DIVISAO_MEDITACAO===\n\n")
-            
-            print(f"Meditação '{title}' segmentada e preparada para o WhatsApp com sucesso.")
+
+            print("Meditação '" + title + "' segmentada e preparada para o WhatsApp com sucesso.")
+            resultados.append((title, scraping_ok, telegram_ok, whatsapp_ok))
+
+        # --- RESUMO FINAL ---
+        print("\n" + "="*60)
+        print("RESUMO FINAL DAS 3 MEDITAÇÕES")
+        print("="*60)
+        todas_ok = True
+        for titulo, scrap_ok, tel_ok, wha_ok in resultados:
+            status_scrap = "OK" if scrap_ok else "FALHA"
+            status_tel = "OK" if tel_ok else "FALHA"
+            status_wha = "OK" if wha_ok else "FALHA"
+            print("  " + titulo + ": scraping=[" + status_scrap + "] telegram=[" + status_tel + "] whatsapp=[" + status_wha + "]")
+            if not (scrap_ok and tel_ok and wha_ok):
+                todas_ok = False
+
+        if todas_ok:
+            print("\n✅ Todas as 3 meditações foram processadas com sucesso.")
+            if os.path.exists("whatsapp_msg.txt"):
+                os.remove("whatsapp_msg.txt")
+            open("whatsapp_msg.txt", "w", encoding="utf-8").close()
+        else:
+            print("\n⚠️  Alguma(s) meditação(ões) falhou(ram). O ficheiro whatsapp_msg.txt foi mantido para inspeção.")
+            linhas_email = ["Nem todas as 3 meditações foram processadas com sucesso.\n\nResultados:"]
+            for t, s, tg, w in resultados:
+                linhas_email.append("  " + t + ": scraping=[" + ("OK" if s else "FALHA") + "] telegram=[" + ("OK" if tg else "FALHA") + "] whatsapp=[" + ("OK" if w else "FALHA") + "]")
+            send_error_email(
+                "Falha parcial no processamento das meditações",
+                "\n".join(linhas_email)
+            )
